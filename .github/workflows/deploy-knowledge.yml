@@ -35,12 +35,12 @@ jobs:
                 echo "不是 Git 仓库，删除并重新克隆..."
                 cd /opt
                 rm -rf its_multi_agent
-                git clone https://github.com/deyongTang/its_multi_agent.git
+                git clone https://${{ secrets.GH_TOKEN }}@github.com/deyongTang/its_multi_agent.git
               fi
             else
               echo "目录不存在，开始克隆仓库..."
               cd /opt
-              git clone https://github.com/deyongTang/its_multi_agent.git
+              git clone https://${{ secrets.GH_TOKEN }}@github.com/deyongTang/its_multi_agent.git
             fi
 
             echo "=== 进入项目目录 ==="
