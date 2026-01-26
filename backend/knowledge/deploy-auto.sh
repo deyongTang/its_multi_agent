@@ -61,6 +61,9 @@ fi
 echo ""
 echo "📥 步骤 3/7: 拉取最新代码..."
 
+# 确保在项目根目录
+cd "$PROJECT_DIR"
+
 # 配置 Git（避免认证问题）
 git config pull.rebase false
 
