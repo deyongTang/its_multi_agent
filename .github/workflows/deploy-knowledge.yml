@@ -22,6 +22,8 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
+            set -e
+
             # 检查项目目录是否存在
             if [ ! -d /opt/its_multi_agent ]; then
               echo "项目目录不存在，首次部署需要先克隆仓库"
@@ -29,5 +31,11 @@ jobs:
               git clone https://github.com/deyongTang/its_multi_agent.git
             fi
 
+            # 进入项目目录并拉取最新代码
+            cd /opt/its_multi_agent
+            echo "拉取最新代码..."
+            git fetch origin main
+            git reset --hard origin/main
+
             # 执行项目中的部署脚本
-            bash /opt/its_multi_agent/backend/knowledge/deploy-auto.sh
+            bash backend/knowledge/deploy-auto.sh
