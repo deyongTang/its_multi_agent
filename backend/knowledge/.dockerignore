@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 日志文件
+logs/
+*.log
+
+# 环境变量文件（不要打包到镜像中）
+.env
+.env.local
+
+# 数据目录（运行时挂载）
+chroma_kb/
+data/
+
+# Git
+.git/
+.gitignore
+
+# 测试
+test/
+tests/
+*.test.py
+
+# 文档
+*.md
+!DEPLOYMENT.md
