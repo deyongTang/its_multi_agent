@@ -28,12 +28,18 @@ jobs:
             if [ ! -d /opt/its_multi_agent ]; then
               echo "项目目录不存在，首次部署需要先克隆仓库"
               cd /opt
-              git clone https://github.com/deyongTang/its_multi_agent.git
+              git clone https://${{ secrets.GH_TOKEN }}@github.com/deyongTang/its_multi_agent.git
             fi
 
             # 进入项目目录并拉取最新代码
             cd /opt/its_multi_agent
             echo "拉取最新代码..."
+
+            # 配置 Git 使用 token
+            git config pull.rebase false
+            git remote set-url origin https://${{ secrets.GH_TOKEN }}@github.com/deyongTang/its_multi_agent.git
+
+            # 拉取最新代码
             git fetch origin main
             git reset --hard origin/main
 
