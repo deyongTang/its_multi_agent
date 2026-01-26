@@ -103,9 +103,10 @@ if __name__ == '__main__':
 
     try:
         # 启动 FastAPI 应用
+        # 绑定 0.0.0.0 允许外部网络访问，127.0.0.1 仅允许本机访问
         uvicorn.run(
             app=create_fast_api(),
-            host="127.0.0.1",
+            host="0.0.0.0",
             port=8001,
             log_config=None  # 禁用 uvicorn 默认日志，使用我们的 loguru
         )
