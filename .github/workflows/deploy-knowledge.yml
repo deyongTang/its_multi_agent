@@ -1,12 +1,6 @@
 name: Deploy Knowledge Platform
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'backend/knowledge/**'
-      - '.github/workflows/deploy-knowledge.yml'
   workflow_dispatch:
 
 jobs:
@@ -35,12 +29,12 @@ jobs:
                 echo "不是 Git 仓库，删除并重新克隆..."
                 cd /opt
                 rm -rf its_multi_agent
-                git clone https://${{ secrets.GH_TOKEN }}@github.com/deyongTang/its_multi_agent.git
+                git clone https://github.com/deyongTang/its_multi_agent.git
               fi
             else
               echo "目录不存在，开始克隆仓库..."
               cd /opt
-              git clone https://${{ secrets.GH_TOKEN }}@github.com/deyongTang/its_multi_agent.git
+              git clone https://github.com/deyongTang/its_multi_agent.git
             fi
 
             echo "=== 进入项目目录 ==="
@@ -55,33 +49,6 @@ jobs:
 
             echo "=== 进入知识库后端目录 ==="
             cd backend/knowledge
-
-            echo "=== 配置 Docker 镜像加速 ==="
-            if [ ! -f /etc/docker/daemon.json ] || ! grep -q "registry-mirrors" /etc/docker/daemon.json; then
-              echo "配置 Docker 镜像源..."
-              sudo mkdir -p /etc/docker
-              sudo tee /etc/docker/daemon.json > /dev/null <<-'DOCKEREOF'
-            {
-              "registry-mirrors": [
-                "https://dockerproxy.com",
-                "https://docker.mirrors.ustc.edu.cn",
-                "https://docker.nju.edu.cn"
-              ],
-              "max-concurrent-downloads": 10,
-              "log-driver": "json-file",
-              "log-opts": {
-                "max-size": "100m",
-                "max-file": "3"
-              }
-            }
-            DOCKEREOF
-              sudo systemctl daemon-reload
-              sudo systemctl restart docker
-              echo "等待 Docker 服务重启..."
-              sleep 5
-            else
-              echo "Docker 镜像加速已配置，跳过"
-            fi
 
             echo "=== 停止旧容器 ==="
             docker-compose down || true
