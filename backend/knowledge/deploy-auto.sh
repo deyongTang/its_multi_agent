@@ -36,6 +36,7 @@ echo "📂 步骤 2/7: 准备项目目录..."
 
 PROJECT_DIR="/opt/its_multi_agent"
 
+# 确保项目目录存在且是有效的 Git 仓库
 if [ -d "$PROJECT_DIR" ]; then
     echo "✅ 项目目录已存在: $PROJECT_DIR"
     cd "$PROJECT_DIR"
@@ -55,14 +56,13 @@ else
     cd its_multi_agent
 fi
 
+echo "✅ 当前目录: $(pwd)"
+
 # ============================================
 # 3. 拉取最新代码
 # ============================================
 echo ""
 echo "📥 步骤 3/7: 拉取最新代码..."
-
-# 确保在项目根目录
-cd "$PROJECT_DIR"
 
 # 配置 Git（避免认证问题）
 git config pull.rebase false
