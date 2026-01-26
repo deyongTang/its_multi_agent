@@ -9,6 +9,23 @@ echo "🚀 ITS Knowledge 知识库平台 - 自动部署"
 echo "=========================================="
 
 # ============================================
+# 0. 初始化：确保在正确的目录
+# ============================================
+PROJECT_DIR="/opt/its_multi_agent"
+
+echo ""
+echo "📍 初始化: 当前目录 $(pwd)"
+echo "📍 目标目录: $PROJECT_DIR"
+
+# 如果项目目录存在，先切换到该目录
+if [ -d "$PROJECT_DIR" ]; then
+    cd "$PROJECT_DIR"
+    echo "✅ 已切换到项目目录"
+else
+    echo "⚠️  项目目录不存在，将在步骤2中创建"
+fi
+
+# ============================================
 # 1. 环境检查
 # ============================================
 echo ""
@@ -34,22 +51,18 @@ echo "✅ Docker 环境检查通过"
 echo ""
 echo "📂 步骤 2/7: 准备项目目录..."
 
-PROJECT_DIR="/opt/its_multi_agent"
-
-# 确保项目目录存在且是有效的 Git 仓库
-if [ -d "$PROJECT_DIR" ]; then
-    echo "✅ 项目目录已存在: $PROJECT_DIR"
-    cd "$PROJECT_DIR"
-
-    # 检查是否为 Git 仓库
-    if [ ! -d .git ]; then
-        echo "⚠️  警告: 不是 Git 仓库，删除并重新克隆..."
-        cd /opt
-        rm -rf its_multi_agent
-        git clone https://github.com/deyongTang/its_multi_agent.git
-        cd its_multi_agent
-    fi
+# 检查是否在 Git 仓库中
+if [ -d "$PROJECT_DIR/.git" ]; then
+    echo "✅ Git 仓库已存在"
+elif [ -d "$PROJECT_DIR" ]; then
+    # 目录存在但不是 Git 仓库
+    echo "⚠️  警告: 目录存在但不是 Git 仓库，删除并重新克隆..."
+    cd /opt
+    rm -rf its_multi_agent
+    git clone https://github.com/deyongTang/its_multi_agent.git
+    cd its_multi_agent
 else
+    # 目录不存在
     echo "📥 项目目录不存在，开始克隆仓库..."
     cd /opt
     git clone https://github.com/deyongTang/its_multi_agent.git
