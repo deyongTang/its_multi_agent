@@ -27,31 +27,42 @@ jobs:
           script: |
             set -e  # 遇到错误立即退出
 
+            echo "=== 检查项目目录 ==="
+            if [ ! -d /opt/its_multi_agent ]; then
+              echo "项目目录不存在，开始克隆仓库..."
+              cd /opt
+              git clone https://github.com/deyongTang/its_multi_agent.git
+            fi
+
             echo "=== 进入项目目录 ==="
             cd /opt/its_multi_agent
 
+            echo "=== 配置 Git（避免认证问题） ==="
+            git config pull.rebase false
+
             echo "=== 拉取最新代码 ==="
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
 
             echo "=== 进入知识库后端目录 ==="
             cd backend/knowledge
 
             echo "=== 停止旧容器 ==="
-            docker compose down
+            docker-compose down || true
 
             echo "=== 构建新镜像 ==="
-            docker compose build --no-cache
+            docker-compose build --no-cache
 
             echo "=== 启动容器 ==="
-            docker compose up -d
+            docker-compose up -d
 
             echo "=== 等待容器启动 ==="
             sleep 5
 
             echo "=== 检查容器状态 ==="
-            docker compose ps
+            docker-compose ps
 
             echo "=== 查看容器日志（最后20行） ==="
-            docker compose logs --tail=20
+            docker-compose logs --tail=20
 
             echo "=== 部署完成 ==="
