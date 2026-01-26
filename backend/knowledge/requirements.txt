@@ -1,0 +1,23 @@
+﻿fastapi              # 高性能异步 Web 框架，用于构建后端 API 接口
+uvicorn              # ASGI 服务器，FastAPI 必须依赖它来启动运行
+requests             # 同步 HTTP 客户端，用于发送网络请求（如下载文件）
+python-dotenv        # 负责读取 .env 文件并将变量加载到环境变量中
+loguru               # 现代化日志框架，支持彩色输出、文件轮转、结构化日志
+langchain-core       # LangChain 核心库，包含 LCEL 链式语法、消息类等基础抽象
+langchain-community  # 社区组件包，包含各种文档加载器 (Document Loaders) 和工具
+langchain-openai     # OpenAI 官方集成包，用于调用 GPT 模型和 Embeddings
+
+langchain-chroma     # Chroma 向量数据库集成（用于本地存储向量数据）
+pydantic-settings    # 配置管理神器，用于规范化读取和验证环境变量:把散落在环境变量（Environment Variables）或 .env 文件中的配置，自动加载并验证到一个 Python 类中
+markdownify          # 将 HTML 转换为 Markdown 格式（网页清洗核心工具）
+scikit-learn         # 机器学习库，常用于本地计算余弦相似度或文本聚类
+jieba                # 中文分词库，RAG 中处理中文切词和关键词提取
+unstructured         # 强大的文档解析库，用于解析 PDF、Word 等非结构化文件
+markdown             # 标准 Markdown 解析库，用于分析 MD 结构或转回 HTML
+python-multipart     # 表单数据解析库，FastAPI 处理文件上传 (UploadFile)
+pymysql              # MySQL 数据库驱动
+DBUtils              # 数据库连接池
+APScheduler          # 定时任务调度器
+elasticsearch==8.12.0  # Elasticsearch 官方 Python 客户端，用于 RAG V2.0 混合检索（匹配服务器版本 8.12.0）
+elastic-transport==8.12.0  # Elasticsearch 传输层，必须与 elasticsearch 版本匹配
+minio                # MinIO Python Client SDK
