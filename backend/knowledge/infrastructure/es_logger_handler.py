@@ -61,8 +61,11 @@ class ESLoggerHandler:
             log_record = json.loads(message)
 
             # 提取关键字段
+            # 将 Unix 时间戳转换为 ISO 8601 格式字符串，避免 ES 存储为 float
+            timestamp = datetime.fromtimestamp(log_record["record"]["time"]["timestamp"]).isoformat()
+
             doc = {
-                "@timestamp": log_record["record"]["time"]["timestamp"],
+                "@timestamp": timestamp,
                 "level": log_record["record"]["level"]["name"],
                 "message": log_record["text"].strip(),
                 "trace_id": log_record["record"]["extra"].get("trace_id", "N/A"),
