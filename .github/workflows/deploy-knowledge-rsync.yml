@@ -1,0 +1,38 @@
+name: Deploy Knowledge Platform (rsync)
+
+# 备用部署方案：使用 rsync 推送代码到服务器
+# 适用于服务器无法访问 GitHub 的情况
+
+on:
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  deploy:
+    name: 部署到远程服务器 (rsync)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 同步代码到服务器
+        uses: burnett01/rsync-deployments@6.0.0
+        with:
+          switches: -avzr --delete
+          path: backend/knowledge/
+          remote_path: /opt/its_multi_agent/backend/knowledge/
+          remote_host: ${{ secrets.SERVER_HOST }}
+          remote_user: ${{ secrets.SERVER_USER }}
+          remote_key: ${{ secrets.SERVER_SSH_KEY }}
+          remote_port: ${{ secrets.SERVER_PORT }}
+
+      - name: 执行部署脚本
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            cd /opt/its_multi_agent/backend/knowledge
+            bash deploy-auto.sh
