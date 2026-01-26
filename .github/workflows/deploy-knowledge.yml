@@ -36,12 +36,6 @@ jobs:
             echo "=== 进入知识库后端目录 ==="
             cd backend/knowledge
 
-            echo "=== 检查 .test-env 文件 ==="
-            if [ ! -f .test-env ]; then
-              echo "错误: .test-env 文件不存在，请先配置环境变量"
-              exit 1
-            fi
-
             echo "=== 停止旧容器 ==="
             docker compose down
 
