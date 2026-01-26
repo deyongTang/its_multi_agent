@@ -827,14 +827,63 @@ rm .env
 
 ### GitHub Actions 配置要求
 
-在 GitHub 仓库的 Settings → Secrets 中配置以下密钥：
+在 GitHub 仓库的 Settings → Secrets and variables → Actions 中配置以下密钥：
 
-| 密钥名称 | 说明 | 示例值 |
-|---------|------|--------|
-| `SERVER_HOST` | 服务器 IP 地址 | `10.206.0.15` |
-| `SERVER_USER` | SSH 用户名 | `root` |
-| `SERVER_SSH_KEY` | SSH 私钥 | `-----BEGIN RSA PRIVATE KEY-----...` |
-| `SERVER_PORT` | SSH 端口 | `22` |
+| 密钥名称 | 说明 | 示例值 | 必需 |
+|---------|------|--------|------|
+| `SERVER_HOST` | 服务器 IP 地址 | `10.206.0.15` | ✅ |
+| `SERVER_USER` | SSH 用户名 | `root` | ✅ |
+| `SERVER_SSH_KEY` | SSH 私钥 | `-----BEGIN RSA PRIVATE KEY-----...` | ✅ |
+| `SERVER_PORT` | SSH 端口 | `22` | ✅ |
+| `GH_TOKEN` | GitHub Personal Access Token | `ghp_xxxxx` | ✅ |
+
+**如何生成 GitHub Token**：
+1. 访问 https://github.com/settings/tokens
+2. 点击 **Generate new token** → **Generate new token (classic)**
+3. 设置 Token 名称：`ITS Deploy Token`
+4. 勾选权限：`repo` (完整的仓库访问权限)
+5. 点击 **Generate token**
+6. 复制生成的 Token 并添加到 GitHub Secrets 中
+
+### 两种部署方式
+
+#### 方式 1: Git Pull 部署（默认，推荐）
+
+**工作流文件**：`.github/workflows/deploy-knowledge.yml`
+
+**工作原理**：
+- GitHub Actions 通过 SSH 连接到服务器
+- 服务器使用 Token 从 GitHub 拉取最新代码
+- 执行部署脚本构建和启动服务
+
+**优点**：
+- 服务器保持完整的 Git 仓库状态
+- 可以查看提交历史和回滚
+- 支持自动重试机制
+
+**缺点**：
+- 需要服务器能访问 GitHub
+- 网络不稳定时可能失败
+
+#### 方式 2: Rsync 推送部署（备用）
+
+**工作流文件**：`.github/workflows/deploy-knowledge-rsync.yml`
+
+**工作原理**：
+- GitHub Actions 检出代码
+- 使用 rsync 直接推送代码到服务器
+- 执行部署脚本构建和启动服务
+
+**优点**：
+- 不需要服务器访问 GitHub
+- 更稳定，不受服务器网络限制
+- 推送速度快
+
+**缺点**：
+- 服务器上不是完整的 Git 仓库
+- 无法查看提交历史
+
+**使用场景**：当服务器无法访问 GitHub 或网络不稳定时使用此方案
 
 ### 触发部署的方式
 

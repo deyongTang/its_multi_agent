@@ -28,20 +28,47 @@ jobs:
             if [ ! -d /opt/its_multi_agent ]; then
               echo "项目目录不存在，首次部署需要先克隆仓库"
               cd /opt
-              git clone https://${{ secrets.GH_TOKEN }}@github.com/deyongTang/its_multi_agent.git
+
+              # 使用 token 克隆，添加重试机制
+              for i in 1 2 3; do
+                echo "尝试克隆仓库 (第 $i 次)..."
+                if git clone https://${{ secrets.GH_TOKEN }}@github.com/deyongTang/its_multi_agent.git; then
+                  echo "克隆成功"
+                  break
+                else
+                  echo "克隆失败，等待 5 秒后重试..."
+                  sleep 5
+                  if [ $i -eq 3 ]; then
+                    echo "克隆失败 3 次，退出"
+                    exit 1
+                  fi
+                fi
+              done
             fi
 
             # 进入项目目录并拉取最新代码
             cd /opt/its_multi_agent
             echo "拉取最新代码..."
 
-            # 配置 Git 使用 token
+            # 配置 Git
             git config pull.rebase false
             git remote set-url origin https://${{ secrets.GH_TOKEN }}@github.com/deyongTang/its_multi_agent.git
 
-            # 拉取最新代码
-            git fetch origin main
-            git reset --hard origin/main
+            # 拉取最新代码，添加重试机制
+            for i in 1 2 3; do
+              echo "尝试拉取代码 (第 $i 次)..."
+              if git fetch origin main && git reset --hard origin/main; then
+                echo "代码更新成功"
+                break
+              else
+                echo "拉取失败，等待 5 秒后重试..."
+                sleep 5
+                if [ $i -eq 3 ]; then
+                  echo "拉取失败 3 次，退出"
+                  exit 1
+                fi
+              fi
+            done
 
             # 执行项目中的部署脚本
             bash backend/knowledge/deploy-auto.sh
