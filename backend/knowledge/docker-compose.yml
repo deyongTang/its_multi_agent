@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: its-knowledge-api
+    env_file:
+      - .test-env
     ports:
       - "8001:8001"
     volumes:
