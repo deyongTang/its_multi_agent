@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  knowledge-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: its-knowledge-api
+    ports:
+      - "8001:8001"
+    volumes:
+      # 持久化向量数据库
+      - ./chroma_kb:/app/chroma_kb
+      # 持久化日志
+      - ./logs:/app/logs
+      # 持久化数据文件
+      - ./data:/app/data
+    environment:
+      # OpenAI API 配置
+      - API_KEY=${API_KEY}
+      - BASE_URL=${BASE_URL}
+      - MODEL=${MODEL:-gpt-3.5-turbo}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-ada-002}
+
+      # 数据库配置
+      - DB_HOST=${DB_HOST:-localhost}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-its_knowledge}
+
+      # MinIO 配置
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET=${MINIO_BUCKET:-knowledge-base}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
+
+      # Elasticsearch 配置
+      - ES_HOST=${ES_HOST}
+      - ES_PORT=${ES_PORT:-9200}
+      - ES_SCHEME=${ES_SCHEME:-http}
+      - ES_USERNAME=${ES_USERNAME}
+      - ES_PASSWORD=${ES_PASSWORD}
+      - ES_INDEX_NAME=${ES_INDEX_NAME}
+
+      # 其他配置
+      - CHUNK_SIZE=${CHUNK_SIZE:-3000}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
+      - TOP_ROUGH=${TOP_ROUGH:-50}
+      - TOP_FINAL=${TOP_FINAL:-5}
+    restart: unless-stopped
+    networks:
+      - its-network
+
+networks:
+  its-network:
+    driver: bridge
