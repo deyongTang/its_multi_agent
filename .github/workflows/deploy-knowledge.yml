@@ -27,9 +27,18 @@ jobs:
           script: |
             set -e  # 遇到错误立即退出
 
-            echo "=== 检查项目目录 ==="
-            if [ ! -d /opt/its_multi_agent ]; then
-              echo "项目目录不存在，开始克隆仓库..."
+            echo "=== 检查并准备项目目录 ==="
+            if [ -d /opt/its_multi_agent ]; then
+              echo "目录已存在，检查是否为 Git 仓库..."
+              cd /opt/its_multi_agent
+              if [ ! -d .git ]; then
+                echo "不是 Git 仓库，删除并重新克隆..."
+                cd /opt
+                rm -rf its_multi_agent
+                git clone https://github.com/deyongTang/its_multi_agent.git
+              fi
+            else
+              echo "目录不存在，开始克隆仓库..."
               cd /opt
               git clone https://github.com/deyongTang/its_multi_agent.git
             fi
