@@ -1,17 +1,20 @@
 name: Deploy Knowledge Platform
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 手动触发
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/knowledge/**'  # 只有知识库代码变更时才触发
 
 jobs:
   deploy:
+    name: 部署到远程服务器
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Deploy to server
+      - name: 执行远程部署
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -19,53 +22,12 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
-            set -e  # 遇到错误立即退出
-
-            echo "=== 检查并准备项目目录 ==="
-            if [ -d /opt/its_multi_agent ]; then
-              echo "目录已存在，检查是否为 Git 仓库..."
-              cd /opt/its_multi_agent
-              if [ ! -d .git ]; then
-                echo "不是 Git 仓库，删除并重新克隆..."
-                cd /opt
-                rm -rf its_multi_agent
-                git clone https://github.com/deyongTang/its_multi_agent.git
-              fi
-            else
-              echo "目录不存在，开始克隆仓库..."
+            # 检查项目目录是否存在
+            if [ ! -d /opt/its_multi_agent ]; then
+              echo "项目目录不存在，首次部署需要先克隆仓库"
               cd /opt
               git clone https://github.com/deyongTang/its_multi_agent.git
             fi
 
-            echo "=== 进入项目目录 ==="
-            cd /opt/its_multi_agent
-
-            echo "=== 配置 Git（避免认证问题） ==="
-            git config pull.rebase false
-
-            echo "=== 拉取最新代码 ==="
-            git fetch origin main
-            git reset --hard origin/main
-
-            echo "=== 进入知识库后端目录 ==="
-            cd backend/knowledge
-
-            echo "=== 停止旧容器 ==="
-            docker-compose down || true
-
-            echo "=== 构建新镜像 ==="
-            docker-compose build --no-cache
-
-            echo "=== 启动容器 ==="
-            docker-compose up -d
-
-            echo "=== 等待容器启动 ==="
-            sleep 5
-
-            echo "=== 检查容器状态 ==="
-            docker-compose ps
-
-            echo "=== 查看容器日志（最后20行） ==="
-            docker-compose logs --tail=20
-
-            echo "=== 部署完成 ==="
+            # 执行项目中的部署脚本
+            bash /opt/its_multi_agent/backend/knowledge/deploy-auto.sh

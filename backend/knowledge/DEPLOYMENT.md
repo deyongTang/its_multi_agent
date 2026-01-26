@@ -90,50 +90,69 @@ sudo usermod -aG docker $USER
 
 ## 快速开始
 
-### 1. 克隆项目到远程服务器
+本项目提供了两种部署方式：
 
+### 方式 1: 使用部署脚本（推荐）
+
+**本地/首次部署：**
 ```bash
-# SSH 登录到远程服务器
+# 克隆项目
+git clone https://github.com/deyongTang/its_multi_agent.git
+cd its_multi_agent/backend/knowledge
+
+# 配置环境变量
+cp .env.example .env
+vim .env  # 编辑配置文件
+
+# 运行部署脚本
+bash deploy.sh
+```
+
+**远程服务器自动部署：**
+```bash
+# SSH 登录到服务器
 ssh user@your-server-ip
 
-# 克隆项目
-git clone https://github.com/deyongTang/its_multi_agent.git its_multi_agent
+# 首次部署：克隆项目到 /opt/its_multi_agent
+cd /opt
+git clone https://github.com/deyongTang/its_multi_agent.git
 cd its_multi_agent/backend/knowledge
+
+# 配置环境变量
+cp .test-env.example .test-env
+vim .test-env  # 编辑配置文件
+
+# 运行自动部署脚本
+bash deploy-auto.sh
 ```
 
-### 2. 配置环境变量
+**GitHub Actions 自动部署：**
+```bash
+# 在 GitHub 仓库页面：Actions → Deploy Knowledge Platform → Run workflow
+# 或者推送代码到 main 分支的 backend/knowledge/ 目录会自动触发部署
+```
+
+### 方式 2: 手动部署
 
 ```bash
-# 复制示例配置文件
+# 1. 克隆项目
+git clone https://github.com/deyongTang/its_multi_agent.git
+cd its_multi_agent/backend/knowledge
+
+# 2. 配置环境变量
 cp .env.example .env
-
-# 编辑配置文件（使用 vim 或 nano）
 vim .env
+
+# 3. 构建并启动
+docker-compose build
+docker-compose up -d
+
+# 4. 查看状态
+docker-compose ps
+docker-compose logs -f
 ```
 
-**必须修改的配置项：**
-- `API_KEY`: 你的 OpenAI API Key
-- `BASE_URL`: OpenAI API 地址（或兼容服务）
-- `DB_PASSWORD`: MySQL 数据库密码
-- `ES_PASSWORD`: Elasticsearch 密码
-
-### 3. 构建并启动服务
-
-```bash
-# 构建 Docker 镜像
-docker compose build
-
-# 启动服务（后台运行）
-docker compose up -d
-
-# 查看服务状态
-docker compose ps
-
-# 查看日志
-docker compose logs -f
-```
-
-### 4. 验证部署
+### 验证部署
 
 ```bash
 # 检查服务是否正常运行
@@ -763,6 +782,326 @@ rm .env
 2. 检查配置：确保 `.env` 文件配置正确
 3. 查看文档：参考 [CLAUDE.md](../../CLAUDE.md) 了解项目架构
 4. 提交 Issue：在项目仓库提交问题报告
+
+---
+
+## 部署架构说明
+
+### 部署脚本职责划分
+
+本项目采用**职责分离**的部署架构设计：
+
+#### 1. GitHub Actions (`.github/workflows/deploy-knowledge.yml`)
+
+**职责**: 仅负责触发部署，不包含具体部署逻辑
+
+```yaml
+# 只做三件事：
+# 1. 连接到远程服务器
+# 2. 执行项目中的部署脚本
+# 3. 返回执行结果
+```
+
+**优势**:
+- 配置简洁，只需维护服务器连接信息
+- 部署逻辑在项目代码中，便于版本控制和测试
+- 可以在本地直接运行部署脚本，无需依赖 CI/CD
+
+#### 2. 部署脚本
+
+**deploy.sh** - 本地/首次部署脚本
+- 检查 Docker 环境
+- 检查并创建 `.env` 配置文件
+- 创建必要目录
+- 构建镜像并启动服务
+- 适用场景：开发环境、首次部署
+
+**deploy-auto.sh** - 自动化部署脚本
+- 检查并准备项目目录
+- 拉取最新代码
+- 停止旧容器
+- 构建新镜像
+- 启动新容器
+- 验证部署状态
+- 适用场景：生产环境、CI/CD 自动部署
+
+### GitHub Actions 配置要求
+
+在 GitHub 仓库的 Settings → Secrets 中配置以下密钥：
+
+| 密钥名称 | 说明 | 示例值 |
+|---------|------|--------|
+| `SERVER_HOST` | 服务器 IP 地址 | `10.206.0.15` |
+| `SERVER_USER` | SSH 用户名 | `root` |
+| `SERVER_SSH_KEY` | SSH 私钥 | `-----BEGIN RSA PRIVATE KEY-----...` |
+| `SERVER_PORT` | SSH 端口 | `22` |
+
+### 触发部署的方式
+
+**方式 1: 手动触发**
+```bash
+# 在 GitHub 仓库页面
+Actions → Deploy Knowledge Platform → Run workflow
+```
+
+**方式 2: 自动触发**
+```bash
+# 推送代码到 main 分支的 backend/knowledge/ 目录
+git add backend/knowledge/
+git commit -m "update knowledge platform"
+git push origin main
+```
+
+**方式 3: 直接在服务器执行**
+```bash
+# SSH 登录到服务器
+ssh user@your-server-ip
+
+# 执行部署脚本
+cd /opt/its_multi_agent/backend/knowledge
+bash deploy-auto.sh
+```
+
+### 部署流程图
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     GitHub Actions                          │
+│  (只负责连接服务器并触发脚本)                                  │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      │ SSH 连接
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   远程服务器                                  │
+│                                                             │
+│  ┌───────────────────────────────────────────────────┐     │
+│  │  deploy-auto.sh (项目中的部署脚本)                  │     │
+│  │                                                   │     │
+│  │  1. 检查环境 (Docker, docker-compose)              │     │
+│  │  2. 准备项目目录 (/opt/its_multi_agent)            │     │
+│  │  3. 拉取最新代码 (git pull)                        │     │
+│  │  4. 停止旧容器 (docker-compose down)               │     │
+│  │  5. 构建新镜像 (docker-compose build)              │     │
+│  │  6. 启动新容器 (docker-compose up -d)              │     │
+│  │  7. 验证部署 (docker-compose ps)                   │     │
+│  └───────────────────────────────────────────────────┘     │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## GitHub Actions 自动化部署问题排查日志
+
+### 部署日期
+2026-01-27
+
+### 部署环境
+- **服务器地址**: 10.206.0.15
+- **部署路径**: /opt/its_multi_agent
+- **容器端口**: 8001
+- **Docker Compose 版本**: docker-compose (旧版命令)
+
+---
+
+### 问题 1: MinIO 配置项缺失
+
+**问题描述**: 在 `.test-env` 配置文件中缺少 MinIO 对象存储的配置项。
+
+**错误现象**: 配置文件中只有 API、数据库和 Elasticsearch 配置，缺少 MinIO 相关配置。
+
+**解决方案**: 在 `.test-env` 文件中添加 MinIO 配置：
+
+```env
+# minio 对象存储配置
+MINIO_ENDPOINT=10.206.0.15:9000
+MINIO_ACCESS_KEY=its_appkey
+MINIO_SECRET_KEY=its_secret123
+MINIO_BUCKET=knowledge-base
+MINIO_SECURE=false
+```
+
+**相关文件**:
+- `backend/knowledge/.test-env`
+- `backend/knowledge/config/settings.py` (第 30-35 行定义了 MinIO 配置项)
+
+---
+
+### 问题 2: GitHub Actions 部署脚本路径错误
+
+**问题描述**: 部署脚本中使用的项目路径 `/opt/its_knowledge` 与实际仓库名不匹配。
+
+**错误现象**:
+```
+bash: line 3: cd: backend/knowledge: No such file or directory
+```
+
+**根本原因**:
+- 脚本中使用: `/opt/its_knowledge`
+- 实际仓库名: `its_multi_agent`
+
+**解决方案**: 修改 `.github/workflows/deploy-knowledge.yml` 中的路径为 `/opt/its_multi_agent`
+
+**相关文件**: `.github/workflows/deploy-knowledge.yml`
+
+---
+
+### 问题 3: Docker Compose 命令版本不兼容
+
+**问题描述**: 服务器上的 Docker 版本较旧，不支持 `docker compose` 命令（新版语法）。
+
+**错误现象**:
+```
+docker: unknown command: docker compose
+Run 'docker --help' for more information
+```
+
+**根本原因**:
+- 新版 Docker: `docker compose` (子命令)
+- 旧版 Docker: `docker-compose` (独立命令)
+
+**解决方案**: 将所有 `docker compose` 改为 `docker-compose`
+
+**相关文件**: `.github/workflows/deploy-knowledge.yml`
+
+---
+
+### 问题 4: Git 仓库认证失败
+
+**问题描述**: 服务器通过 HTTPS 克隆 GitHub 仓库时需要交互式输入用户名密码。
+
+**错误现象**:
+```
+fatal: could not read Username for 'https://github.com': No such device or address
+```
+
+**根本原因**: HTTPS 克隆需要认证，但 SSH 环境无法交互式输入凭据。
+
+**解决方案**: 使用 GitHub Personal Access Token 进行认证：
+
+```bash
+git clone https://${GH_TOKEN}@github.com/deyongTang/its_multi_agent.git
+```
+
+**配置步骤**:
+1. 访问 https://github.com/settings/tokens
+2. 生成 Personal Access Token (勾选 `repo` 权限)
+3. 在 GitHub 仓库 Settings → Secrets 中添加 `GH_TOKEN`
+
+**相关文件**: `.github/workflows/deploy-knowledge.yml`
+
+---
+
+### 问题 5: 服务器目录存在但不是 Git 仓库
+
+**问题描述**: `/opt/its_multi_agent` 目录存在，但不是有效的 Git 仓库。
+
+**错误现象**:
+
+```text
+fatal: not a git repository (or any of the parent directories): .git
+```
+
+**根本原因**: 目录可能是手动创建的，或之前的部署失败导致 `.git` 目录缺失。
+
+**解决方案**: 添加 Git 仓库检测逻辑：
+
+```bash
+if [ -d /opt/its_multi_agent ]; then
+  cd /opt/its_multi_agent
+  if [ ! -d .git ]; then
+    echo "不是 Git 仓库，删除并重新克隆..."
+    cd /opt
+    rm -rf its_multi_agent
+    git clone https://${GH_TOKEN}@github.com/deyongTang/its_multi_agent.git
+  fi
+fi
+```
+
+**相关文件**: `.github/workflows/deploy-knowledge.yml` (第 31-44 行)
+
+---
+
+### 问题 6: Docker Hub 镜像拉取失败
+
+**问题描述**: 服务器无法访问 Docker Hub (`registry-1.docker.io`)，导致无法拉取基础镜像。
+
+**错误现象**:
+
+```text
+Get "https://registry-1.docker.io/v2/": net/http: request canceled while waiting for connection
+```
+
+**根本原因**: 国内网络环境无法直接访问 Docker Hub。
+
+**解决方案 1**: 配置 Docker 镜像加速
+
+在 `/etc/docker/daemon.json` 中配置国内镜像源：
+
+```json
+{
+  "registry-mirrors": [
+    "https://dockerproxy.com",
+    "https://docker.mirrors.ustc.edu.cn",
+    "https://docker.nju.edu.cn"
+  ],
+  "max-concurrent-downloads": 10,
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m",
+    "max-file": "3"
+  }
+}
+```
+
+配置后重启 Docker:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+```
+
+**解决方案 2**: 配置 pip 国内镜像源
+
+在 `Dockerfile` 中添加清华大学 pip 镜像：
+
+```dockerfile
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+**相关文件**:
+- `.github/workflows/deploy-knowledge.yml` (第 59-84 行)
+- `backend/knowledge/Dockerfile` (第 13-14 行)
+
+---
+
+### 问题 7: docker-compose.yml 环境变量配置冲突
+
+**问题描述**: `docker-compose.yml` 中同时使用 `env_file` 和 `environment`，导致变量未设置警告。
+
+**错误现象**:
+
+```text
+The MINIO_ENDPOINT variable is not set. Defaulting to a blank string.
+The MINIO_ACCESS_KEY variable is not set. Defaulting to a blank string.
+```
+
+**根本原因**: 配置冲突：
+- `env_file: .test-env` - 从文件读取变量（容器内生效）
+- `environment: ${MINIO_ENDPOINT}` - 从 shell 环境读取（宿主机环境中不存在）
+
+**解决方案**: 移除 `environment` 部分，只保留 `env_file`:
+
+```yaml
+services:
+  knowledge-api:
+    env_file:
+      - .test-env
+    # 移除 environment 部分
+```
+
+**相关文件**: `backend/knowledge/docker-compose.yml`
 
 ---
 
