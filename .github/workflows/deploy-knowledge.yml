@@ -57,19 +57,31 @@ jobs:
             cd backend/knowledge
 
             echo "=== 配置 Docker 镜像加速 ==="
-            sudo mkdir -p /etc/docker
-            sudo tee /etc/docker/daemon.json > /dev/null <<-'DOCKEREOF'
+            if [ ! -f /etc/docker/daemon.json ] || ! grep -q "registry-mirrors" /etc/docker/daemon.json; then
+              echo "配置 Docker 镜像源..."
+              sudo mkdir -p /etc/docker
+              sudo tee /etc/docker/daemon.json > /dev/null <<-'DOCKEREOF'
             {
               "registry-mirrors": [
+                "https://dockerproxy.com",
                 "https://docker.mirrors.ustc.edu.cn",
-                "https://hub-mirror.c.163.com",
-                "https://mirror.ccs.tencentyun.com"
-              ]
+                "https://docker.nju.edu.cn"
+              ],
+              "max-concurrent-downloads": 10,
+              "log-driver": "json-file",
+              "log-opts": {
+                "max-size": "100m",
+                "max-file": "3"
+              }
             }
             DOCKEREOF
-            sudo systemctl daemon-reload
-            sudo systemctl restart docker
-            sleep 3
+              sudo systemctl daemon-reload
+              sudo systemctl restart docker
+              echo "等待 Docker 服务重启..."
+              sleep 5
+            else
+              echo "Docker 镜像加速已配置，跳过"
+            fi
 
             echo "=== 停止旧容器 ==="
             docker-compose down || true
