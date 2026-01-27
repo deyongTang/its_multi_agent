@@ -89,7 +89,8 @@ const handleLogin = async () => {
         ElMessage.success('登录成功')
         router.push('/knowledge')
       } catch (error) {
-        ElMessage.error(error.response?.data?.detail || '登录失败,请检查用户名和密码')
+        // 错误已在 request.js 拦截器中处理，这里不再重复显示
+        console.error('登录失败:', error)
       } finally {
         loading.value = false
       }
