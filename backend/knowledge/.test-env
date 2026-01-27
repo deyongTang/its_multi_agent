@@ -5,7 +5,7 @@ EMBEDDING_MODEL=text-embedding-v3
 KNOWLEDGE_BASE_URL=https://iknow.lenovo.com.cn
 
 # Database Config
-DB_HOST=10.206.0.15
+DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=root
 DB_PASSWORD=NewPassword123!
