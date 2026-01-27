@@ -29,11 +29,21 @@ export function queryKnowledge(data) {
 export async function queryKnowledgeStream(data, onChunk) {
   const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001'
 
+  // 从 localStorage 获取 token
+  const token = localStorage.getItem('access_token')
+
+  const headers = {
+    'Content-Type': 'application/json',
+  }
+
+  // 如果 token 存在，添加到 headers
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
   const response = await fetch(`${baseURL}/query`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify(data)
   })
 

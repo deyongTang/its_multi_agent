@@ -20,10 +20,16 @@ async def query_knowledge(question: str) -> Dict:
 
     async with  httpx.AsyncClient(trust_env=False) as client:
         try:
+            # 构建请求头
+            headers = {}
+            if settings.KNOWLEDGE_BASE_TOKEN:
+                headers["Authorization"] = f"Bearer {settings.KNOWLEDGE_BASE_TOKEN}"
+
             # 1. 发送请求（异步上下文管理器对象）
             response = await client.post(
                 url=f"{settings.KNOWLEDGE_BASE_URL}/query",
                 json={"question": question},
+                headers=headers,
                 timeout=60)
 
             # 2. 处理异常情况(4xx-600x)直接抛出异常

@@ -1,10 +1,19 @@
 README.md
 setup.py
 api/__init__.py
+api/auth_routes.py
 api/main.py
 api/routers.py
 config/__init__.py
 config/settings.py
+infrastructure/__init__.py
+infrastructure/auth_dependencies.py
+infrastructure/database.py
+infrastructure/es_client.py
+infrastructure/es_logger_handler.py
+infrastructure/logger.py
+infrastructure/middleware.py
+infrastructure/object_storage.py
 knowledge.egg-info/PKG-INFO
 knowledge.egg-info/SOURCES.txt
 knowledge.egg-info/dependency_links.txt
@@ -34,4 +43,5 @@ test/test_html_to_markdown.py
 test/test_illegal_chars.py
 test/test_range.py
 utils/__init__.py
+utils/security.py
 utils/text_utils.py
