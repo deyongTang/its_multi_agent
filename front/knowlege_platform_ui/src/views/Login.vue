@@ -69,33 +69,37 @@ const loginForm = reactive({
 
 const loginRules = {
   username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' }
+    { required: true, message: '请输入用户名', trigger: ['blur', 'change'] }
   ],
   password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, message: '密码长度不能少于6位', trigger: 'blur' }
+    { required: true, message: '请输入密码', trigger: ['blur', 'change'] },
+    { min: 6, message: '密码长度不能少于6位', trigger: ['blur', 'change'] }
   ]
 }
 
 const handleLogin = async () => {
   if (!loginFormRef.value) return
 
-  await loginFormRef.value.validate(async (valid) => {
-    if (valid) {
-      loading.value = true
-      try {
-        const response = await login(loginForm)
-        setToken(response.access_token, response.refresh_token)
-        ElMessage.success('登录成功')
-        router.push('/knowledge')
-      } catch (error) {
-        // 错误已在 request.js 拦截器中处理，这里不再重复显示
-        console.error('登录失败:', error)
-      } finally {
-        loading.value = false
-      }
+  try {
+    const valid = await loginFormRef.value.validate()
+    if (!valid) return
+
+    loading.value = true
+    try {
+      const response = await login(loginForm)
+      setToken(response.access_token, response.refresh_token)
+      ElMessage.success('登录成功')
+      router.push('/knowledge')
+    } catch (error) {
+      // 错误已在 request.js 拦截器中处理，这里不再重复显示
+      console.error('登录失败:', error)
+    } finally {
+      loading.value = false
     }
-  })
+  } catch (error) {
+    // 表单验证失败
+    console.log('表单验证失败:', error)
+  }
 }
 </script>
 

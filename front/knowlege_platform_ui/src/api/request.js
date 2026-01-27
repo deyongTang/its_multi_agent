@@ -34,12 +34,23 @@ service.interceptors.response.use(
     if (error.response) {
       const status = error.response.status
       const message = error.response.data?.detail || error.response.data?.message
+      const url = error.config?.url || ''
 
       switch (status) {
         case 401:
-          removeToken()
-          ElMessage.error('登录已过期,请重新登录')
-          window.location.href = '/login'
+          // 区分登录失败和 Token 过期
+          if (url.includes('/auth/login')) {
+            // 登录接口返回 401，说明用户名或密码错误
+            ElMessage.error(message || '用户名或密码错误')
+          } else {
+            // 其他接口返回 401，说明 Token 过期
+            removeToken()
+            ElMessage.error('登录已过期,请重新登录')
+            // 使用 router 跳转而不是 window.location
+            setTimeout(() => {
+              window.location.href = '/login'
+            }, 1000)
+          }
           break
         case 400:
           ElMessage.error(message || '请求参数错误')
