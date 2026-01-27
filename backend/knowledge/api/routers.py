@@ -7,8 +7,9 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import aiofiles
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from fastapi.concurrency import run_in_threadpool
+from infrastructure.auth_dependencies import get_current_user
 
 from services.ingestion.ingestion_processor import IngestionProcessor
 from schemas.schema import UploadResponse, QueryRequest, QueryResponse
@@ -188,7 +189,10 @@ def get_es_retrieval_service():
 
 # IO(对文件读写) 执行SQL 网络请求 典型耗时任务
 @router.post("/upload", response_model=UploadResponse, summary="处理知识库上传")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
     # "0430-联想手机K900常见问题汇总.md"
     temp_file_path = ""
 
@@ -236,7 +240,10 @@ async def upload_file(file: UploadFile = File(...)):
 
 
 @router.post("/upload_es", response_model=UploadResponse, summary="上传文档到 Elasticsearch")
-async def upload_file_to_es(file: UploadFile = File(...)):
+async def upload_file_to_es(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
     """
     上传文档到 Elasticsearch（N+1 存储模式）
     - N 个切片用于搜索（带向量）
@@ -295,7 +302,10 @@ async def upload_file_to_es(file: UploadFile = File(...)):
 
 
 @router.post("/query", summary="查询知识库（流式输出）")
-async def query_knowledge(request: QueryRequest):
+async def query_knowledge(
+    request: QueryRequest,
+    current_user: dict = Depends(get_current_user)
+):
     """
     流式查询知识库接口
     返回 Server-Sent Events (SSE) 格式的流式响应

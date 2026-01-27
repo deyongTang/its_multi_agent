@@ -1,3 +1,4 @@
+README.md
 setup.py
 api/__init__.py
 api/main.py
@@ -15,6 +16,11 @@ repositories/vector_store_repository.py
 schemas/__init__.py
 schemas/schema.py
 services/__init__.py
+services/embedding_service.py
+services/es_ingestion_processor.py
+services/es_retrieval_service.py
+services/retrieval_service.py
+services/text_processor.py
 services/crawler/__init__.py
 services/crawler/client.py
 services/crawler/parser.py

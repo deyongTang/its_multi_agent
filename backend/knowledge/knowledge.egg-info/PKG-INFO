@@ -1,4 +1,4 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.4
 Name: knowledge
 Version: 0.1.0
 Requires-Dist: fastapi
@@ -16,3 +16,4 @@ Requires-Dist: jieba
 Requires-Dist: unstructured
 Requires-Dist: markdown
 Requires-Dist: python-multipart
+Dynamic: requires-dist

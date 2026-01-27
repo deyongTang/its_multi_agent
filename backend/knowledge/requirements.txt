@@ -21,3 +21,8 @@ APScheduler          # 定时任务调度器
 elasticsearch==8.12.0  # Elasticsearch 官方 Python 客户端，用于 RAG V2.0 混合检索（匹配服务器版本 8.12.0）
 elastic-transport==8.12.0  # Elasticsearch 传输层，必须与 elasticsearch 版本匹配
 minio                # MinIO Python Client SDK
+
+# JWT 认证相关依赖
+PyJWT                # JWT Token 生成和验证
+passlib[bcrypt]      # 密码加密库（包含 bcrypt 算法）
+email-validator      # 邮箱格式验证（Pydantic EmailStr 需要）

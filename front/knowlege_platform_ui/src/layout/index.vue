@@ -19,6 +19,12 @@
           <span>智能问答</span>
         </el-menu-item>
       </el-menu>
+      <div class="logout-container">
+        <el-button type="danger" @click="handleLogout" class="logout-btn">
+          <el-icon><SwitchButton /></el-icon>
+          <span>退出登录</span>
+        </el-button>
+      </div>
     </div>
     <div class="main-container">
       <router-view v-slot="{ Component }">
@@ -32,10 +38,25 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessageBox, ElMessage } from 'element-plus'
+import { removeToken } from '@/utils/auth'
 
 const route = useRoute()
+const router = useRouter()
 const activeMenu = computed(() => route.path)
+
+const handleLogout = () => {
+  ElMessageBox.confirm('确定要退出登录吗?', '提示', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(() => {
+    removeToken()
+    ElMessage.success('已退出登录')
+    router.push('/login')
+  }).catch(() => {})
+}
 </script>
 
 <style lang="scss" scoped>
@@ -71,6 +92,16 @@ const activeMenu = computed(() => route.path)
   
   .el-menu-vertical {
     border-right: none;
+    flex: 1;
+  }
+
+  .logout-container {
+    padding: 20px;
+    border-top: 1px solid #30363d;
+
+    .logout-btn {
+      width: 100%;
+    }
   }
 }
 
