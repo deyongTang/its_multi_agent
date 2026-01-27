@@ -22,7 +22,9 @@ def hash_password(password: str) -> str:
     Returns:
         加密后的密码哈希值
     """
-    return pwd_context.hash(password)
+    # bcrypt 限制密码最长 72 字节，需要截断
+    password_bytes = password.encode('utf-8')[:72]
+    return pwd_context.hash(password_bytes)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -36,7 +38,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         密码是否匹配
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    # bcrypt 限制密码最长 72 字节，需要截断
+    password_bytes = plain_password.encode('utf-8')[:72]
+    return pwd_context.verify(password_bytes, hashed_password)
 
 
 def create_access_token(data: Dict, expires_delta: Optional[timedelta] = None) -> str:

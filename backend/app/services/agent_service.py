@@ -54,6 +54,7 @@ class MultiAgentService:
             agent_result = streaming_result.final_output
 
             format_agent_result = re.sub(r'\n+', '\n', agent_result)
+
             # 6. 存储历史对话
             chat_history.append({"role": "assistant", "content": format_agent_result})
 

@@ -64,6 +64,10 @@ class Settings(BaseSettings):
         default=None,
         description="知识库服务URL"
     )
+    KNOWLEDGE_BASE_TOKEN: Optional[str] = Field(
+        default=None,
+        description="知识库服务认证 Token"
+    )
 
     # 通义千问搜索服务
     DASHSCOPE_BASE_URL: Optional[str] = Field(
@@ -79,6 +83,26 @@ class Settings(BaseSettings):
     BAIDUMAP_AK: Optional[str] = Field(
         default=None,
         description="百度地图 AK (Access Key)"
+    )
+
+    # ==================== LangSmith 配置 ====================
+
+    # LangSmith 可观测性平台
+    LANGCHAIN_TRACING_V2: bool = Field(
+        default=False,
+        description="是否启用 LangSmith 追踪"
+    )
+    LANGCHAIN_API_KEY: Optional[str] = Field(
+        default=None,
+        description="LangSmith API Key"
+    )
+    LANGCHAIN_PROJECT: Optional[str] = Field(
+        default="ITS-MultiAgent",
+        description="LangSmith 项目名称"
+    )
+    LANGCHAIN_ENDPOINT: Optional[str] = Field(
+        default="https://api.smith.langchain.com",
+        description="LangSmith API 端点"
     )
 
     # ==================== Pydantic Settings 配置 ====================

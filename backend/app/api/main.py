@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from api.routers import router
 from infrastructure.logging.logger import logger
 from infrastructure.tools.mcp.mcp_manager import mcp_connect, mcp_cleanup
+from infrastructure.observability.langsmith_client import langsmith_client
 
 
 @asynccontextmanager
@@ -12,11 +13,20 @@ async def lifespan(app: FastAPI):
     """
     FastAPI应用生命周期管理
 
-    在应用启动时建立MCP连接，在应用关闭时清理连接。
+    在应用启动时建立MCP连接和初始化Langfuse，在应用关闭时清理连接。
     确保资源正确初始化和释放。
     """
     # 应用启动时执行
-    logger.info("应用启动，建立MCP连接...")
+    logger.info("应用启动，初始化服务...")
+
+    # 初始化 LangSmith
+    try:
+        langsmith_client.initialize()
+        logger.info("LangSmith 初始化完成")
+    except Exception as e:
+        logger.error(f"LangSmith 初始化失败: {str(e)}")
+
+    # 建立 MCP 连接
     try:
         await mcp_connect()
         logger.info("MCP连接建立完成")
@@ -26,7 +36,9 @@ async def lifespan(app: FastAPI):
     yield  # 应用运行期间（先别释放mcp链接 去处理请求...）
 
     # 应用关闭时执行
-    logger.info("应用关闭，清理MCP连接...")
+    logger.info("应用关闭，清理资源...")
+
+    # 清理 MCP 连接
     try:
         await mcp_cleanup()
         logger.info("MCP连接清理完成")
