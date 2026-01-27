@@ -21,6 +21,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routers import router
+from api.auth_routes import auth_router
 
 # 全局标志，确保日志系统只初始化一次
 _logger_initialized = False
@@ -88,6 +89,7 @@ def create_fast_api() -> FastAPI:
 
     # 4. 注册各种路由
     app.include_router(router=router)
+    app.include_router(router=auth_router)  # 注册认证路由
 
     # 5. 返回创建的 FastAPI
     return app

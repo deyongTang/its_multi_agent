@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     WORKER_MAX_RETRY: int = 3
     WORKER_INTERVAL_SECONDS: int = 30
 
+    # JWT 认证配置
+    JWT_SECRET_KEY: str = Field(default="your-secret-key-change-in-production")
+    JWT_ALGORITHM: str = Field(default="HS256")
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30)
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7)
+
     model_config = SettingsConfigDict(
         env_file=os.path.join(_project_root, ".env"),
         env_file_encoding="utf-8",
