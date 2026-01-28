@@ -3,6 +3,7 @@ from starlette.responses import StreamingResponse
 
 from schemas.request import ChatMessageRequest, UserSessionsRequest
 from services.agent_service import MultiAgentService
+from services.agent_service_v2 import MultiAgentServiceV2
 from infrastructure.logging.logger import logger
 from services.session_service import session_service
 
@@ -10,8 +11,8 @@ from services.session_service import session_service
 router = APIRouter()
 
 
-# 2. 定义对话请求
-@router.post("/api/query", summary="智能体对话接口")
+# 2. 定义对话请求 (V1 - 旧版 Orchestrator)
+@router.post("/api/query", summary="智能体对话接口 (V1)")
 async def query(request_context: ChatMessageRequest) -> StreamingResponse:
     """
     SSE返回数据（流式响应）
@@ -40,6 +41,23 @@ async def query(request_context: ChatMessageRequest) -> StreamingResponse:
         media_type="text/event-stream"
     )
 
+# 3. 定义对话请求 (V2 - LangGraph 新版)
+@router.post("/api/v2/query", summary="智能体对话接口 (V2 - LangGraph)")
+async def query_v2(request_context: ChatMessageRequest) -> StreamingResponse:
+    """
+    LangGraph 引擎对话接口
+    """
+    user_id = request_context.context.user_id
+    user_query = request_context.query
+    logger.info(f"[V2] 用户 {user_id} 发送任务: {user_query}")
+
+    async_generator_result = MultiAgentServiceV2.process_task(request_context, flag=True)
+
+    return StreamingResponse(
+        content=async_generator_result,
+        status_code=200,
+        media_type="text/event-stream"
+    )
 
 @router.post("/api/user_sessions")
 def get_user_sessions(request: UserSessionsRequest):

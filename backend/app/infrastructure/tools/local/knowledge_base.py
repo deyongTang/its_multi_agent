@@ -36,6 +36,20 @@ async def query_knowledge(question: str) -> Dict:
             response.raise_for_status()
 
             # 3. 处理正常情况
+            # 兼容流式响应 (SSE)
+            if "text/event-stream" in response.headers.get("Content-Type", ""):
+                answer_chunks = []
+                for line in response.text.splitlines():
+                    if line.startswith("data:"):
+                        # 去掉 'data:' 前缀
+                        content = line[5:]
+                        # 去掉协议规定的第一个空格
+                        if content.startswith(" "):
+                            content = content[1:]
+                        answer_chunks.append(content)
+                return {"question": question, "answer": "".join(answer_chunks)}
+            
+            # 普通 JSON 响应
             return response.json()
 
         except httpx.HTTPError as e:

@@ -97,5 +97,5 @@ def decode_token(token: str) -> Optional[Dict]:
         return payload
     except jwt.ExpiredSignatureError:
         return None
-    except jwt.JWTError:
+    except jwt.PyJWTError:  # Fixed: JWTError -> PyJWTError for PyJWT library
         return None

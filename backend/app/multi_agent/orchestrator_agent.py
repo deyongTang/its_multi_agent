@@ -8,7 +8,7 @@ from infrastructure.ai.openai_client import sub_model
 from infrastructure.ai.openai_client import main_model
 from infrastructure.ai.prompt_loader import load_prompt
 from multi_agent.agent_factory import AGENT_TOOLS
-from infrastructure.tools.mcp.mcp_servers import search_mcp_client, baidu_mcp_client
+from infrastructure.tools.mcp.mcp_servers import get_search_mcp_client, get_baidu_mcp_client
 from contextlib import AsyncExitStack
 
 # 1. 创建主调度智能体
@@ -36,9 +36,11 @@ async def run_single_test(case_name: str, input_text: str):
     async with AsyncExitStack() as stack:
         try:
             print("连接 MCP 服务中...")
-            # 1. 进入上下文
-            await stack.enter_async_context(search_mcp_client)
-            await stack.enter_async_context(baidu_mcp_client)
+            # 1. 进入上下文（使用 getter 函数获取客户端）
+            search_client = get_search_mcp_client()
+            baidu_client = get_baidu_mcp_client()
+            await stack.enter_async_context(search_client)
+            await stack.enter_async_context(baidu_client)
             print("思考中...")
 
             # 2. 使用流式处理运行 Orchestrator Agent

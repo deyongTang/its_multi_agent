@@ -8,3 +8,9 @@ httpx
 openai-agents
 pystun3
 langsmith
+bcrypt==4.0.1
+
+# LangGraph 工作流引擎
+langgraph>=0.2.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0

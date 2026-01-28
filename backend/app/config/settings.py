@@ -137,5 +137,6 @@ class Settings(BaseSettings):
 
 
 # 创建全局配置实例
+# 注意：这里直接实例化是安全的，因为 Pydantic Settings 会在实例化时读取 .env 文件
 settings = Settings()
 

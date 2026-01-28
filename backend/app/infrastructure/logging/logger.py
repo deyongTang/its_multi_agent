@@ -1,9 +1,14 @@
 import os
 import sys
 import logging
+from contextvars import ContextVar
 # 这是一个高级的文件处理器，它能根据时间（比如每天午夜）自动切割日志文件，防止一个文件无限变大
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+
+# ================= TraceId 上下文变量 =================
+# 使用 contextvars 在异步环境中传递 traceId
+trace_id_var: ContextVar[str] = ContextVar('trace_id', default='-')
 
 # ================= 配置区域(日志存在哪”以及“日志长什么样) =================
 
@@ -17,14 +22,25 @@ LOG_DIR = BASE_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # 2. 定义日志格式
-# 格式：[时间] [级别] [文件名:行号] - 消息
-FILE_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
-CONSOLE_FORMAT = "%(asctime)s | %(levelname)-8s | %(message)s"
+# 格式：[时间] [级别] [traceId] [文件名:行号] - 消息
+FILE_FORMAT = "%(asctime)s | %(levelname)-8s | [%(trace_id)s] | %(name)s:%(lineno)d | %(message)s"
+CONSOLE_FORMAT = "%(asctime)s | %(levelname)-8s | [%(trace_id)s] | %(message)s"
 # %(asctime)s:   打印时间 (例如 2026-1-07 10:00:00)
 # %(levelname)-8s: 打印日志级别 (INFO, ERROR等)。-8s 表示左对齐，占8个字符宽度，为了排版整齐。
 # %(name)s:      logger的名字 (这里是 "ITS_App")
 # %(lineno)d:    打印这行日志是在哪一行代码触发的 (非常便于找 Bug)
 # %(message)s:   你具体打印的内容
+
+# ================= TraceId Filter =================
+class TraceIdFilter(logging.Filter):
+    """
+    自定义 Filter，在每条日志记录中注入 trace_id
+    """
+    def filter(self, record):
+        # 从上下文变量中获取 trace_id，如果没有则使用 '-'
+        record.trace_id = trace_id_var.get()
+        return True
+
 
 # ================= 彩色日志格式器 (仅用于控制台) =================
 class ColoredFormatter(logging.Formatter):
@@ -72,10 +88,14 @@ def get_logger(name="ITS_App"):
 
     logger.setLevel(logging.DEBUG)  # 总开关设为最低，由 handler 决定具体过滤
 
+    # 创建 TraceId Filter 实例
+    trace_filter = TraceIdFilter()
+
     # --- 1. 控制台 Handler (带颜色) ---
     console_handler = logging.StreamHandler(sys.stdout)         # 输出到标准输出(屏幕)
     console_handler.setLevel(logging.INFO)  # 控制台只看 INFO 以上 # 使用刚才定义的彩色格式
     console_handler.setFormatter(ColoredFormatter())
+    console_handler.addFilter(trace_filter)  # 添加 traceId filter
     logger.addHandler(console_handler)
 
     # --- 2. 通用日志 (每天轮转, 保留30天) ---
@@ -89,6 +109,7 @@ def get_logger(name="ITS_App"):
     )
     app_handler.setLevel(logging.INFO)      # 门槛：INFO 及以上写入文件
     app_handler.setFormatter(logging.Formatter(FILE_FORMAT))  # 使用详细的文件格式
+    app_handler.addFilter(trace_filter)  # 添加 traceId filter
     logger.addHandler(app_handler)
 
     # --- 3. 错误日志 (每天轮转, 保留60天) ---
@@ -102,6 +123,7 @@ def get_logger(name="ITS_App"):
     )
     error_handler.setLevel(logging.ERROR)       # 只有 ERROR 及以上才写进来
     error_handler.setFormatter(logging.Formatter(FILE_FORMAT))
+    error_handler.addFilter(trace_filter)  # 添加 traceId filter
     logger.addHandler(error_handler)
 
     # --- 4. Agent/Debug 详细日志 (用于追踪 LLM 思考过程) ---
@@ -115,6 +137,7 @@ def get_logger(name="ITS_App"):
     )
     agent_handler.setLevel(logging.DEBUG)
     agent_handler.setFormatter(logging.Formatter(FILE_FORMAT))
+    agent_handler.addFilter(trace_filter)  # 添加 traceId filter
     logger.addHandler(agent_handler)
 
     return logger
@@ -122,3 +145,6 @@ def get_logger(name="ITS_App"):
 # 日志大小级别：DEBUG(10)<INFO(20)<WARNING(30)<ERROR(40)<CRITICAL(50)
 # 创建全局单例，方便其他文件直接 import logger
 logger = get_logger()
+
+# 导出 trace_id_var 供其他模块使用
+__all__ = ['logger', 'trace_id_var']

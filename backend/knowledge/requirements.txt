@@ -24,5 +24,6 @@ minio                # MinIO Python Client SDK
 
 # JWT 认证相关依赖
 PyJWT                # JWT Token 生成和验证
-passlib[bcrypt]      # 密码加密库（包含 bcrypt 算法）
+passlib[bcrypt]
+bcrypt==4.0.1      # 密码加密库（包含 bcrypt 算法）
 email-validator      # 邮箱格式验证（Pydantic EmailStr 需要）

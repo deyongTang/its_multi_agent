@@ -1,20 +1,30 @@
 from infrastructure.ai.prompt_loader import load_prompt
 from infrastructure.ai.openai_client import sub_model
 from infrastructure.tools.local.knowledge_base import query_knowledge
-from infrastructure.tools.mcp.mcp_servers import search_mcp_client
+from infrastructure.tools.mcp.mcp_servers import get_search_mcp_client
 from agents import Agent, ModelSettings
 from agents import Runner,RunConfig
 
 
-# 1. 定义技术智能体
-technical_agent = Agent(
-    name="资讯与技术专家",
-    instructions=load_prompt("technical_agent"),
-    model=sub_model,
-    model_settings=ModelSettings(temperature=0),  # 不要发挥内容(软件层面限制模型的发挥)
-    tools=[query_knowledge],
-    mcp_servers=[search_mcp_client],
-)
+# 1. 定义技术智能体（延迟初始化 MCP 客户端）
+def get_technical_agent():
+    """
+    获取技术智能体实例
+
+    使用函数包装以延迟 MCP 客户端的初始化，
+    确保在调用时 settings 已经完全加载
+    """
+    return Agent(
+        name="资讯与技术专家",
+        instructions=load_prompt("technical_agent"),
+        model=sub_model,
+        model_settings=ModelSettings(temperature=0),  # 不要发挥内容(软件层面限制模型的发挥)
+        tools=[query_knowledge],
+        mcp_servers=[get_search_mcp_client()],
+    )
+
+# 为了向后兼容，保留旧的变量名（但改为 None，需要时调用 get_technical_agent()）
+technical_agent = None
 
 
 # 2. 测试技术智能体
@@ -25,15 +35,18 @@ async def run_single_test(case_name: str, input_text: str):
     print(f"输入: \"{input_text}\"")
     print("-" * 80)
     try:
-        await search_mcp_client.connect()
+        search_client = get_search_mcp_client()
+        await search_client.connect()
         print("思考中...")
-        result = await Runner.run(technical_agent, input=input_text,run_config=RunConfig(tracing_disabled=True))
+        agent = get_technical_agent()
+        result = await Runner.run(agent, input=input_text,run_config=RunConfig(tracing_disabled=True))
         print(f"\n\nAgent的最终输出: {result.final_output}")
     except Exception as e:
         print(f"\n Error: {e}\n")
     finally:
         try:
-            await search_mcp_client.cleanup()
+            search_client = get_search_mcp_client()
+            await search_client.cleanup()
         except:
             pass
 

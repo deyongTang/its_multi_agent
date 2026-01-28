@@ -620,7 +620,7 @@ const handleServiceStation = () => {
         
         try {
           // 调用后端API
-          const response = await fetch('http://127.0.0.1:8000/api/query', {
+          const response = await fetch('http://127.0.0.1:8000/api/v2/query', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
