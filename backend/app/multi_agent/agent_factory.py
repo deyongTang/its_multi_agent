@@ -1,9 +1,8 @@
 from agents import function_tool, Runner
-from agents.run import RunConfig
 
-from multi_agent.technical_agent import technical_agent
-from multi_agent.service_agent import comprehensive_service_agent
-from infrastructure.tools.mcp.mcp_servers import search_mcp_client, baidu_mcp_client
+from multi_agent.technical_agent import get_technical_agent
+from multi_agent.service_agent import get_comprehensive_service_agent
+from infrastructure.tools.mcp.mcp_servers import get_search_mcp_client, get_baidu_mcp_client
 
 from infrastructure.logging.logger import logger
 
@@ -27,10 +26,10 @@ async def consult_technical_expert(
         logger.info(f"[Route] 转交技术专家: {query[:30]}...")
 
         # 直接透传用户指令，不要做任何加工
+        agent = get_technical_agent()
         result = await Runner.run(
-            technical_agent,
-            input=query,
-            run_config=RunConfig(tracing_disabled=True)
+            agent,
+            input=query
         )
         return result.final_output
     except Exception as e:
@@ -54,10 +53,10 @@ async def query_service_station_and_navigate(
     """
     try:
         logger.info(f"[Route] 转交业务专家: {query[:30]}...")
+        agent = get_comprehensive_service_agent()
         result = await Runner.run(
-            comprehensive_service_agent,
-            input=query,
-            run_config=RunConfig(tracing_disabled=True)
+            agent,
+            input=query
         )
         return result.final_output
     except Exception as e:
@@ -76,7 +75,8 @@ async def run_technical_tool():
     print("\n" + "=" * 80)
     print("测试技术专家Agent Tool")
     print("=" * 80)
-    await search_mcp_client.connect()
+    search_client = get_search_mcp_client()
+    await search_client.connect()
 
     test_cases = ["今天小米股价多少"]
 
@@ -86,7 +86,7 @@ async def run_technical_tool():
         result = await consult_technical_expert(query=query)
         print(f"回答: {result}\n")
 
-    await search_mcp_client.cleanup()
+    await search_client.cleanup()
 
 
 async def run_service_tool():
@@ -95,7 +95,8 @@ async def run_service_tool():
     print("测试业务服务Agent Tool")
     print("=" * 80)
 
-    await baidu_mcp_client.connect()
+    baidu_client = get_baidu_mcp_client()
+    await baidu_client.connect()
 
     test_cases = [
         # "我想去小米之家修电脑",
@@ -108,7 +109,7 @@ async def run_service_tool():
         result = await query_service_station_and_navigate(query=query)
         print(f"回答: {result}\n")
 
-    await baidu_mcp_client.cleanup()
+    await baidu_client.cleanup()
 
 
 async def main():

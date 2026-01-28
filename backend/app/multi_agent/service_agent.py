@@ -1,6 +1,3 @@
-from agents import set_tracing_disabled
-
-set_tracing_disabled(True)
 from agents import Agent, ModelSettings
 from infrastructure.ai.openai_client import sub_model
 from infrastructure.tools.local.service_station import (
@@ -9,28 +6,38 @@ from infrastructure.tools.local.service_station import (
 )
 
 from infrastructure.tools.mcp.mcp_servers import (
-    baidu_mcp_client,
+    get_baidu_mcp_client,
 )
 from infrastructure.ai.prompt_loader import load_prompt
 
-comprehensive_service_agent = Agent(
-    name="全能业务智能体",
-    instructions=load_prompt("comprehensive_service_agent"),
-    model=sub_model,
-    model_settings=ModelSettings(
-        temperature=0,
-        max_tokens=2048,
-    ),
-    # 本地工具：只有服务站查询相关
-    tools=[
-        resolve_user_location_from_text,
-        query_nearest_repair_shops_by_coords,
-    ],
-    # 远程MCP工具：地图
-    mcp_servers=[
-        baidu_mcp_client
-    ],
-)
+def get_comprehensive_service_agent():
+    """
+    获取全能业务智能体实例
+
+    使用函数包装以延迟 MCP 客户端的初始化，
+    确保在调用时 settings 已经完全加载
+    """
+    return Agent(
+        name="全能业务智能体",
+        instructions=load_prompt("comprehensive_service_agent"),
+        model=sub_model,
+        model_settings=ModelSettings(
+            temperature=0,
+            max_tokens=2048,
+        ),
+        # 本地工具：只有服务站查询相关
+        tools=[
+            resolve_user_location_from_text,
+            query_nearest_repair_shops_by_coords,
+        ],
+        # 远程MCP工具：地图
+        mcp_servers=[
+            get_baidu_mcp_client()
+        ],
+    )
+
+# 为了向后兼容，保留旧的变量名（但改为 None，需要时调用 get_comprehensive_service_agent()）
+comprehensive_service_agent = None
 
 
 async def run_single_test(case_name: str, input_text: str):
@@ -42,13 +49,15 @@ async def run_single_test(case_name: str, input_text: str):
     print(f"输入: \"{input_text}\"")
     print("-" * 80)
     try:
-        await baidu_mcp_client.connect()
+        baidu_client = get_baidu_mcp_client()
+        await baidu_client.connect()
         print("思考中...")
-        # result = await Runner.run(comprehensive_service_agent, input=input_text)
+        agent = get_comprehensive_service_agent()
+        # result = await Runner.run(agent, input=input_text)
 
         # 使用流式处理
         result = Runner.run_streamed(
-            starting_agent=comprehensive_service_agent,
+            starting_agent=agent,
             input=input_text,
         )
 
@@ -71,7 +80,8 @@ async def run_single_test(case_name: str, input_text: str):
         print(f"\n Error: {e}\n")
     finally:
         try:
-            await baidu_mcp_client.cleanup()
+            baidu_client = get_baidu_mcp_client()
+            await baidu_client.cleanup()
         except:
             pass
 

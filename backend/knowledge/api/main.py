@@ -97,6 +97,7 @@ def create_fast_api() -> FastAPI:
 
 
 if __name__ == '__main__':
+    import asyncio
     # 日志系统会在 create_fast_api() 中自动初始化
     logger.info("🚀 准备启动 Web 服务器")
 
@@ -105,29 +106,21 @@ if __name__ == '__main__':
 
     try:
         # 启动 FastAPI 应用
-        # 绑定 0.0.0.0 允许外部网络访问，127.0.0.1 仅允许本机访问
-        uvicorn.run(
+        # 使用 Server 对象直接启动，避免 uvicorn.run 在 Python 3.13+ 调用 asyncio.run 时传入不支持的 loop_factory 参数
+        config = uvicorn.Config(
             app=create_fast_api(),
             host="0.0.0.0",
             port=8001,
             log_config=None  # 禁用 uvicorn 默认日志，使用我们的 loguru
         )
+        server = uvicorn.Server(config)
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(server.serve())
+        
         logger.info("✅ Web 服务器启动成功")
     except KeyboardInterrupt:
         logger.warning("⚠️ 服务器被用户中断")
     except Exception as e:
         logger.error(f"❌ 启动 Web 服务器失败: {str(e)}")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
