@@ -14,7 +14,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: 检查是否有实际变更
+        id: check-changes
+        run: |
+          # 获取当前推送和上一次提交的差异
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # 对于push事件，检查指定路径是否有实际文件变更
+            git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | grep -E '^backend/knowledge/' > changes.txt
+            if [ -s changes.txt ]; then
+              echo "检测到知识库代码变更"
+              echo "has_changes=true" >> $GITHUB_OUTPUT
+              cat changes.txt
+            else
+              echo "没有检测到知识库代码的实际变更，跳过部署"
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            # 对于手动触发，总是部署
+            echo "手动触发部署"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: 执行远程部署
+        if: steps.check-changes.outputs.has_changes == 'true'
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -23,12 +45,10 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           script: |
             set -e
-
             # 检查项目目录是否存在
             if [ ! -d /opt/its_multi_agent ]; then
               echo "项目目录不存在，首次部署需要先克隆仓库"
               cd /opt
-
               # 使用 token 克隆，添加重试机制
               for i in 1 2 3; do
                 echo "尝试克隆仓库 (第 $i 次)..."
@@ -45,30 +65,45 @@ jobs:
                 fi
               done
             fi
-
+            
             # 进入项目目录并拉取最新代码
             cd /opt/its_multi_agent
             echo "拉取最新代码..."
-
+            
+            # 保存当前提交哈希
+            CURRENT_COMMIT=$(git rev-parse HEAD)
+            
             # 配置 Git
             git config pull.rebase false
             git remote set-url origin https://${{ secrets.GH_TOKEN }}@github.com/deyongTang/its_multi_agent.git
-
-            # 拉取最新代码，添加重试机制
-            for i in 1 2 3; do
-              echo "尝试拉取代码 (第 $i 次)..."
-              if git fetch origin main && git reset --hard origin/main; then
-                echo "代码更新成功"
-                break
-              else
-                echo "拉取失败，等待 5 秒后重试..."
-                sleep 5
-                if [ $i -eq 3 ]; then
-                  echo "拉取失败 3 次，退出"
-                  exit 1
-                fi
-              fi
-            done
-
+            
+            # 拉取最新代码
+            echo "拉取远程更新..."
+            git fetch origin main
+            
+            # 检查是否有新提交
+            NEW_COMMIT=$(git rev-parse origin/main)
+            
+            if [ "$CURRENT_COMMIT" = "$NEW_COMMIT" ]; then
+              echo "代码已经是最新版本，无需部署"
+              exit 0
+            fi
+            
+            echo "检测到新版本: $NEW_COMMIT (旧版本: $CURRENT_COMMIT)"
+            
+            # 拉取并重置到最新代码
+            git reset --hard origin/main
+            
+            # 显示变更信息
+            echo "========== 代码变更摘要 =========="
+            git log --oneline $CURRENT_COMMIT..$NEW_COMMIT -- "backend/knowledge/"
+            echo "=================================="
+            
             # 执行项目中的部署脚本
-            bash backend/knowledge/deploy-auto.sh
+            if [ -f "backend/knowledge/deploy-auto.sh" ]; then
+              echo "开始执行部署脚本..."
+              bash backend/knowledge/deploy-auto.sh
+            else
+              echo "错误：部署脚本不存在: backend/knowledge/deploy-auto.sh"
+              exit 1
+            fi
