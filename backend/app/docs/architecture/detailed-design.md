@@ -34,41 +34,48 @@
 graph TD
     User[用户终端] --> WAF[WAF/API Gateway]
     WAF --> Auth[认证鉴权 & 限流]
-    Auth --> Guard_In["输入安全围栏 (PII过滤/注入检测)"]
-    
-    subgraph "Core Orchestration Engine (Python)"
+    Auth --> Guard_In[输入安全围栏]
+
+    subgraph Core["Core Orchestration Engine (Python)"]
         Guard_In --> Router{意图路由 Agent}
-        
-        Router -- 简单问答 --> Chat[通用 Chat Agent]
-        Router -- 故障诊断/复杂任务 --> FSM[有限状态机 (FSM)]
-        
-        subgraph "FSM Context (Shared Memory)"
+
+        Router -->|简单问答| Chat[通用 Chat Agent]
+        Router -->|故障诊断/复杂任务| FSM[有限状态机]
+
+        subgraph FSMContext["FSM Context (Shared Memory)"]
             State1[SlotFilling] --> State2[StrategyGen]
             State2 --> State3[ActionExec]
             State3 --> State4[ResponseGen]
         end
-        
-        FSM --> HITL[Human In The Loop (人工介入)]
+
+        FSM --> State1
+        State4 --> HITL[Human In The Loop]
     end
-    
-    subgraph "Knowledge & Service Layer"
-        State3 -- Active RAG --> SearchAPI[增强检索服务]
-        SearchAPI --> ES[Elasticsearch (混合检索)]
-        SearchAPI --> Rerank[RRF 重排模型]
-        
-        State3 -- Tool Call --> Tools[外部工具 (API/DB)]
+
+    subgraph Knowledge["Knowledge & Service Layer"]
+        SearchAPI[增强检索服务]
+        ES[Elasticsearch]
+        Rerank[RRF 重排模型]
+        Tools[外部工具]
+
+        SearchAPI --> ES
+        SearchAPI --> Rerank
     end
-    
-    subgraph "Data Closed Loop System"
+
+    State3 -->|Active RAG| SearchAPI
+    State3 -->|Tool Call| Tools
+
+    subgraph DataLoop["Data Closed Loop System"]
         Log[全链路日志] --> ETL[数据清洗]
         Feedback[用户反馈] --> Label[自动/人工标注]
-        Label --> Eval[效果评估 (AutoEval)]
-        Eval -- Bad Cases --> KB_Update[知识库修正]
-        Eval -- Bad Cases --> Prompt_Opt[Prompt 优化]
+        Label --> Eval[效果评估]
+        Eval -->|Bad Cases| KB_Update[知识库修正]
+        Eval -->|Bad Cases| Prompt_Opt[Prompt 优化]
     end
-    
-    Guard_In --> Response
-    Response --> Guard_Out[输出安全围栏 (幻觉检测/合规审查)]
+
+    State4 --> Response[响应生成]
+    Response --> Guard_Out[输出安全围栏]
+    Guard_Out --> User
 ```
 
 ---
