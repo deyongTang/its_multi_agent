@@ -20,17 +20,15 @@ def route_slot_check(state: AgentState) -> str:
     Returns:
         下一个节点名称
     """
-    trace_id = state.get("trace_id", "-")
     missing_slots = state.get("missing_slots", [])
 
-    logger.info(f"[{trace_id}] 槽位检查: 缺失 {len(missing_slots)} 个槽位")
+    logger.info(f"槽位检查: 缺失 {len(missing_slots)} 个槽位")
 
     # 有缺失槽位，需要追问
     if missing_slots:
-        logger.info(f"[{trace_id}] 槽位不完整，进入追问流程: {missing_slots}")
+        logger.info(f"槽位不完整，进入追问流程: {missing_slots}")
         return "ask_user"
 
-    # 槽位完整，Phase 1 暂时结束
-    # Phase 2 会改为: return "strategy_gen"
-    logger.info(f"[{trace_id}] 槽位完整，Phase 1 流程结束")
-    return "END"
+    # 槽位完整，进入策略生成阶段
+    logger.info("槽位完整，进入策略生成阶段")
+    return "strategy_gen"

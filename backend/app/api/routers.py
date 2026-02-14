@@ -2,7 +2,7 @@ from fastapi.routing import APIRouter
 from starlette.responses import StreamingResponse
 
 from schemas.request import ChatMessageRequest, UserSessionsRequest
-from services.agent_service import MultiAgentService
+# from services.agent_service import MultiAgentService  # V1 已废弃
 from services.agent_service_v2 import MultiAgentServiceV2
 from infrastructure.logging.logger import logger
 from services.session_service import session_service
@@ -11,30 +11,19 @@ from services.session_service import session_service
 router = APIRouter()
 
 
-# 2. 定义对话请求 (V1 - 旧版 Orchestrator)
-@router.post("/api/query", summary="智能体对话接口 (V1)")
+# 2. 定义对话请求 (V1 - 旧版 Orchestrator) - 已废弃，使用 V2
+@router.post("/api/query", summary="智能体对话接口 (V2 - LangGraph)")
 async def query(request_context: ChatMessageRequest) -> StreamingResponse:
     """
-    SSE返回数据（流式响应）
-    响应头中：text/event-stream
-    Args:
-        request_context: 请求上下文
-
-    Returns:
-        StreamingResponse
-
+    LangGraph 引擎对话接口（主接口）
     """
-
-    # 1. 获取请求上下文的属性
     user_id = request_context.context.user_id
     user_query = request_context.query
-    print(request_context.flag)
-    logger.info(f"用户 {user_id} 发送的待处理任务 {user_query}")
+    logger.info(f"用户 {user_id} 发送任务: {user_query}")
 
-    # 2. 调用AgentService（智能体的业务服务类）
-    async_generator_result = MultiAgentService.process_task(request_context, flag=True)
+    # 使用 V2 LangGraph 引擎
+    async_generator_result = MultiAgentServiceV2.process_task(request_context, flag=True)
 
-    # 3. 封装结果到StreamingResponse中
     return StreamingResponse(
         content=async_generator_result,
         status_code=200,

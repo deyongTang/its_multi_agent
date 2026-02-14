@@ -118,15 +118,42 @@ class QueryService:
             yield "未找到相关知识，请上传相关文档后再查询。"
             return
 
-        # 构建上下文（与 generate_answer 保持一致）
-        context_text = "\n\n".join([f"资料{i + 1}：{doc.page_content}" for i, doc in enumerate(context_docs)])
+        # --- 构建分层上下文 ---
+        direct_docs = []  # 核心层：原始问题检索结果
+        ref_docs = []     # 参考层：重写问题检索结果
+
+        for doc in context_docs:
+            # 默认为 original，兼容旧代码
+            source_type = doc.metadata.get("source_type", "original")
+            if source_type == "rewritten":
+                ref_docs.append(doc)
+            else:
+                direct_docs.append(doc)
+
+        context_parts = []
+        
+        # 1. 构建直接相关资料部分
+        if direct_docs:
+            doc_texts = [f"资料{i+1}: {d.page_content}" for i, d in enumerate(direct_docs)]
+            context_parts.append(f"【直接相关资料】(基于您的原始提问):\n" + "\n".join(doc_texts))
+        
+        # 2. 构建扩展参考资料部分
+        if ref_docs:
+            doc_texts = [f"参考资料{i+1}: {d.page_content}" for i, d in enumerate(ref_docs)]
+            context_parts.append(f"【扩展参考资料】(基于系统推断):\n" + "\n".join(doc_texts))
+            
+        context_text = "\n\n" + ("="*20) + "\n\n".join(context_parts) + "\n\n" + ("="*20)
 
         # 记录上下文长度
         if logger:
-            logger.info(f"📝 上下文长度: {len(context_text)} 字符 | 文档数: {len(context_docs)}")
+            logger.info(f"📝 上下文构建完成 | 核心文档: {len(direct_docs)} | 参考文档: {len(ref_docs)} | 总长度: {len(context_text)} 字符")
 
         prompt = f"""
-       请根据以下资料回答用户问题，不能基于资料中未提及的信息。
+       请根据以下资料回答用户问题。
+       
+       【资料说明】
+       - **直接相关资料**：基于用户原始提问检索，准确度高，请优先参考。
+       - **扩展参考资料**：基于系统重写/推断检索，仅作为补充，当直接资料不足时参考。
 
        【重要格式要求】
         - 资料中的图片链接必须保留，但**不要使用 Markdown 图片语法（如 [描述](链接)）**。

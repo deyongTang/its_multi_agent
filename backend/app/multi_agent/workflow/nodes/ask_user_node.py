@@ -25,17 +25,16 @@ async def node_ask_user(state: AgentState) -> AgentState:
     Returns:
         更新后的状态（包含追问消息）
     """
-    trace_id = state.get("trace_id", "-")
     missing_slots = state.get("missing_slots", [])
     current_intent = state.get("current_intent", "chitchat")
     ask_user_count = state.get("ask_user_count", 0)
 
     try:
-        logger.info(f"[{trace_id}] 生成追问话术，缺失槽位: {missing_slots}")
+        logger.info(f"生成追问话术，缺失槽位: {missing_slots}")
 
         # 1. 防止无限追问（最多追问 3 次）
         if ask_user_count >= 3:
-            logger.warning(f"[{trace_id}] 追问次数超限，转人工处理")
+            logger.warning("追问次数超限，转人工处理")
             return {
                 **state,
                 "need_human_help": True,
@@ -75,7 +74,7 @@ async def node_ask_user(state: AgentState) -> AgentState:
         question = response.content.strip()
 
         logger.info(
-            f"[{trace_id}] 追问生成完成: {question[:50]}...",
+            f"追问生成完成: {question[:50]}...",
             extra={
                 "biz.ask_count": ask_user_count + 1,
                 "biz.missing_slots": missing_slots
@@ -90,7 +89,7 @@ async def node_ask_user(state: AgentState) -> AgentState:
         }
 
     except Exception as e:
-        logger.error(f"[{trace_id}] 追问节点异常: {e}")
+        logger.error(f"追问节点异常: {e}")
         state.setdefault("error_log", []).append(f"Ask user error: {str(e)}")
 
         # 降级：使用通用追问

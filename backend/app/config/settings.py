@@ -57,6 +57,16 @@ class Settings(BaseSettings):
     MYSQL_CONNECT_TIMEOUT: int = Field(default=10, description="MySQL连接超时（秒）")
     MYSQL_MAX_CONNECTIONS: int = Field(default=5, description="MySQL最大连接数")
 
+    # ==================== Redis 配置 ====================
+
+    REDIS_HOST: str = Field(default="localhost", description="Redis主机地址")
+    REDIS_PORT: int = Field(default=6379, description="Redis端口")
+    REDIS_PASSWORD: Optional[str] = Field(default=None, description="Redis密码")
+    REDIS_DB: int = Field(default=0, description="Redis数据库编号")
+    REDIS_DECODE_RESPONSES: bool = Field(default=True, description="是否自动解码响应")
+    REDIS_SOCKET_TIMEOUT: int = Field(default=5, description="Redis Socket 超时（秒）")
+    REDIS_SOCKET_CONNECT_TIMEOUT: int = Field(default=5, description="Redis 连接超时（秒）")
+
     # ==================== 外部服务配置 ====================
 
     # 知识库服务

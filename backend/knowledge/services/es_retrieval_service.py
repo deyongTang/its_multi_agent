@@ -292,19 +292,17 @@ class ESRetrievalService:
 
     def _rrf_fusion(
         self,
-        keyword_results: List[Dict[str, Any]],
-        vector_results: List[Dict[str, Any]],
+        ranking_lists: List[List[Dict[str, Any]]],
         k: int = 60,
     ) -> List[Dict[str, Any]]:
         """
-        RRF (Reciprocal Rank Fusion) 融合排序算法
+        通用的 RRF (Reciprocal Rank Fusion) 融合排序算法
 
         核心公式：score(doc) = Σ 1/(k + rank_i(doc))
         其中 k=60 是常用的平滑参数
 
         Args:
-            keyword_results: BM25 关键词检索结果
-            vector_results: 向量检索结果
+            ranking_lists: 多个排序列表的列表。每个内部列表代表一路检索结果 (Rank 1..N)
             k: RRF 平滑参数（默认 60）
 
         Returns:
@@ -312,60 +310,47 @@ class ESRetrievalService:
         """
         rrf_scores = {}
 
-        # 1. 计算关键词检索的 RRF 分数
-        for rank, result in enumerate(keyword_results, start=1):
-            knowledge_no = result["knowledge_no"]
-            score = 1.0 / (k + rank)
-            if knowledge_no not in rrf_scores:
-                rrf_scores[knowledge_no] = {
-                    "knowledge_no": knowledge_no,
-                    "doc_id": result["doc_id"],
-                    "title": result["title"],
-                    "content": result["content"],
-                    "chunk_index": result["chunk_index"],
-                    "rrf_score": 0.0,
-                    "keyword_rank": rank,
-                    "vector_rank": None,
-                }
-            rrf_scores[knowledge_no]["rrf_score"] += score
+        # 遍历每一路检索结果（投票者）
+        for ranking_list in ranking_lists:
+            # 遍历该路结果中的每个文档，Rank 从 1 开始
+            for rank, result in enumerate(ranking_list, start=1):
+                knowledge_no = result["knowledge_no"]
+                score = 1.0 / (k + rank)
+                
+                if knowledge_no not in rrf_scores:
+                    # 初始化文档信息
+                    rrf_scores[knowledge_no] = {
+                        "knowledge_no": knowledge_no,
+                        "doc_id": result["doc_id"],
+                        "title": result["title"],
+                        "content": result["content"],
+                        "chunk_index": result["chunk_index"],
+                        "rrf_score": 0.0,
+                        # 记录每一路的命中情况 (可选，用于调试)
+                        "hit_count": 0
+                    }
+                
+                # 累加分数
+                rrf_scores[knowledge_no]["rrf_score"] += score
+                rrf_scores[knowledge_no]["hit_count"] += 1
 
-        # 2. 计算向量检索的 RRF 分数
-        for rank, result in enumerate(vector_results, start=1):
-            knowledge_no = result["knowledge_no"]
-            score = 1.0 / (k + rank)
-            if knowledge_no not in rrf_scores:
-                rrf_scores[knowledge_no] = {
-                    "knowledge_no": knowledge_no,
-                    "doc_id": result["doc_id"],
-                    "title": result["title"],
-                    "content": result["content"],
-                    "chunk_index": result["chunk_index"],
-                    "rrf_score": 0.0,
-                    "keyword_rank": None,
-                    "vector_rank": rank,
-                }
-            else:
-                rrf_scores[knowledge_no]["vector_rank"] = rank
-            rrf_scores[knowledge_no]["rrf_score"] += score
-
-        # 3. 按 RRF 分数排序
+        # 按 RRF 分数倒序排列
         sorted_results = sorted(
             rrf_scores.values(), key=lambda x: x["rrf_score"], reverse=True
         )
 
-        logger.info(f"✅ RRF 融合完成: {len(sorted_results)} 个唯一知识点")
+        logger.info(f"✅ RRF 融合完成: 聚合了 {len(ranking_lists)} 路结果，生成 {len(sorted_results)} 个唯一知识点")
         return sorted_results
 
     def rrf_search(
         self, query: str, top_k: int = 5, rrf_k: int = 60
     ) -> List[Dict[str, Any]]:
         """
-        基于 RRF 的混合检索（用于 A/B 测试）
+        基于 RRF 的混合检索（单 Query）
 
         流程：
         1. 分别执行 BM25 关键词检索和向量检索
         2. 使用 RRF 算法融合两路结果
-        3. 按 knowledge_no 去重（已在 RRF 融合中完成）
 
         Args:
             query: 用户查询
@@ -383,6 +368,7 @@ class ESRetrievalService:
             logger.info(f"🔍 开始 RRF 混合检索: {query}")
 
             # 2. 分别执行两路检索（召回更多候选）
+            # 注意：每路独立召回 top_k * 3
             keyword_results = self._keyword_search(query_segmented, top_k=top_k * 3)
             vector_results = self._vector_search(query_vector, top_k=top_k * 3)
 
@@ -390,40 +376,94 @@ class ESRetrievalService:
             logger.info(f"   向量检索: {len(vector_results)} 个结果")
 
             # 3. RRF 融合排序
-            fused_results = self._rrf_fusion(keyword_results, vector_results, k=rrf_k)
+            # 传入两个列表：[BM25结果, Vector结果]
+            fused_results = self._rrf_fusion([keyword_results, vector_results], k=rrf_k)
 
             # 4. 取 Top-K
             final_results = fused_results[:top_k]
 
-            logger.info(f"✅ RRF 检索完成，返回 {len(final_results)} 个知识点")
             return final_results
 
         except Exception as e:
             logger.error(f"❌ RRF 检索失败: {e}")
             raise
 
-    def retrieve(
-        self, query: str, top_k: int = 5, return_full_content: bool = True
+    def multi_query_rrf_search(
+        self, queries: List[str], top_k: int = 5, rrf_k: int = 60
     ) -> List[Dict[str, Any]]:
         """
-        完整的检索流程（RAG V2.0）
+        多路查询 RRF 融合检索
 
         流程：
-        1. 混合检索（BM25 + 向量）
-        2. Collapse 折叠去重
-        3. 获取父文档完整内容
+        1. 遍历每个查询语句（如：原始 Query 和 重写 Query）
+        2. 对每个查询分别执行关键词检索和向量检索
+        3. 将所有检索路（Query数 * 2）作为独立的投票列表，投入 RRF 容器进行统一融合
 
         Args:
-            query: 用户查询
+            queries: 查询语句列表
+            top_k: 最终返回的数量
+            rrf_k: RRF 平滑参数
+
+        Returns:
+            List[Dict]: 融合后的最优结果
+        """
+        try:
+            all_ranking_lists = []
+
+            for q in queries:
+                if not q.strip():
+                    continue
+                
+                logger.info(f"🔍 [多路检索] 处理子查询: {q}")
+                
+                # 预处理
+                query_segmented = self.text_processor.segment_chinese(q)
+                query_vector = self.embedding_service.embed_query(q)
+                
+                # 分别召回
+                kw_res = self._keyword_search(query_segmented, top_k=top_k * 3)
+                vec_res = self._vector_search(query_vector, top_k=top_k * 3)
+                
+                # 将每一路结果作为一个独立的列表加入
+                if kw_res:
+                    all_ranking_lists.append(kw_res)
+                if vec_res:
+                    all_ranking_lists.append(vec_res)
+
+            # 执行 RRF 融合
+            # 此时 all_ranking_lists 包含 (Query数 * 2) 个列表，每个列表的 Rank 都是从 1 开始
+            fused_results = self._rrf_fusion(all_ranking_lists, k=rrf_k)
+
+            # 取 Top-K
+            final_results = fused_results[:top_k]
+            
+            logger.info(f"✅ 多路 RRF 检索完成，融合了 {len(queries)} 个查询 ({len(all_ranking_lists)} 路结果)，返回 {len(final_results)} 个知识点")
+            return final_results
+
+        except Exception as e:
+            logger.error(f"❌ 多路 RRF 检索失败: {e}")
+            raise
+
+    def retrieve(
+        self, query: Any, top_k: int = 5, return_full_content: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        完整的检索流程 (支持单 Query 或 Multi-Query)
+
+        Args:
+            query: 用户查询 (str 或 List[str])
             top_k: 返回的知识点数量
             return_full_content: 是否返回完整内容（Parent）
 
         Returns:
-            List[Dict]: 检索结果，包含完整内容
+            List[Dict]: 检索结果
         """
         try:
-            # 1. 混合检索
-            search_results = self.hybrid_search(query, top_k=top_k)
+            # 1. 确定检索方案
+            if isinstance(query, list):
+                search_results = self.multi_query_rrf_search(query, top_k=top_k)
+            else:
+                search_results = self.rrf_search(query, top_k=top_k)
 
             if not search_results:
                 logger.warning("⚠️ 未找到匹配的文档")

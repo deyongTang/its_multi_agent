@@ -4,8 +4,8 @@ from agents import (
     ModelSettings,
     Runner
 )
-from infrastructure.ai.openai_client import sub_model
-from infrastructure.ai.openai_client import main_model
+# 使用 OpenAI Agents SDK 的模型
+from infrastructure.ai.openai_client import agents_sub_model, agents_main_model
 from infrastructure.ai.prompt_loader import load_prompt
 from multi_agent.agent_factory import AGENT_TOOLS
 from infrastructure.tools.mcp.mcp_servers import get_search_mcp_client, get_baidu_mcp_client
@@ -15,8 +15,8 @@ from contextlib import AsyncExitStack
 orchestrator_agent = Agent(
     name="主调度智能体",
     instructions=load_prompt("orchestrator_v1"),
-    # model=main_model,   # 推理模型（ds_r1[1.科学 2.计算 3.需求拆解]） (已推理为主，干活其次【funcation_call】)
-    model=sub_model,      # 通用模型（已干活为主 推理可能有或者都没有）
+    # model=agents_main_model,   # 推理模型（ds_r1[1.科学 2.计算 3.需求拆解]） (已推理为主，干活其次【funcation_call】)
+    model=agents_sub_model,      # 通用模型（已干活为主 推理可能有或者都没有）
     model_settings=ModelSettings(
         temperature=0,
     ),

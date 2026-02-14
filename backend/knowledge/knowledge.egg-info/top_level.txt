@@ -1,8 +1,0 @@
-api
-config
-infrastructure
-repositories
-schemas
-services
-test
-utils

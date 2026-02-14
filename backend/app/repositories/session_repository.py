@@ -43,7 +43,7 @@ class SessionRepository:
             session_id: 会话ID。
 
         Returns:
-            List[Dict]: 解析后的会话数据。
+            List[Dict]: 解析后的会话数据（按 seq_id 排序）。
             None: 如果文件不存在。
 
         Raises:
@@ -55,7 +55,18 @@ class SessionRepository:
             return None
 
         with file_path.open("r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+
+        # 确保数据按 seq_id 排序（防止并发写入导致的乱序）
+        if data and isinstance(data, list):
+            # 为没有 seq_id 的旧数据自动补充
+            for i, msg in enumerate(data):
+                if "seq_id" not in msg:
+                    msg["seq_id"] = i
+            # 按 seq_id 排序
+            data.sort(key=lambda x: x.get("seq_id", 0))
+
+        return data
 
     def save_session(
             self, user_id: str, session_id: str, data: List[Dict[str, Any]]
@@ -128,6 +139,25 @@ class SessionRepository:
     def _get_file_path(self, user_id: str, session_id: str) -> Path:
         """获取具体会话文件的路径对象。"""
         return self._get_user_directory(user_id) / f"{session_id}.json"
+
+    def get_max_seq_id(self, user_id: str, session_id: str) -> int:
+        """获取会话中最大的 seq_id。
+
+        Args:
+            user_id: 用户ID。
+            session_id: 会话ID。
+
+        Returns:
+            int: 最大的 seq_id，如果会话不存在或为空则返回 -1。
+        """
+        data = self.load_session(user_id, session_id)
+
+        if not data:
+            return -1
+
+        # 获取所有消息的 seq_id，找出最大值
+        seq_ids = [msg.get("seq_id", 0) for msg in data]
+        return max(seq_ids) if seq_ids else -1
 
 
 # 全局单例

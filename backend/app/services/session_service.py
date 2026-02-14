@@ -4,6 +4,14 @@ from typing import List, Dict, Any
 from repositories.session_repository import session_repository
 from infrastructure.logging.logger import logger
 
+# 导入 Redis 分布式锁（可选依赖）
+try:
+    from infrastructure.redis_lock import redis_lock
+    REDIS_LOCK_AVAILABLE = True
+except ImportError:
+    REDIS_LOCK_AVAILABLE = False
+    logger.warning("Redis 分布式锁不可用，将使用无锁模式（仅适用于单实例部署）")
+
 
 class SessionService:
     """
@@ -77,8 +85,10 @@ class SessionService:
 
     def save_history(self, user_id: str, session_id: str, chat_history: List[Dict[str, Any]]):
         """
-        保存历史会话
+        保存历史会话（带分布式锁和 seq_id 支持）
+
         调用的时机：调用完LLM（Agent）之后
+
         Args:
             user_id: 用户id
             session_id: 会话id
@@ -91,11 +101,18 @@ class SessionService:
         if chat_history is None:
             return
 
-        # 2. 保存
-        target_session_id=session_id  if session_id else self.DEFAULT_SESSION_ID
+        # 2. 确定目标会话ID
+        target_session_id = session_id if session_id else self.DEFAULT_SESSION_ID
 
         try:
-            self._repo.save_session(user_id, target_session_id, chat_history)
+            # 3. 使用分布式锁保护并发写入（如果可用）
+            if REDIS_LOCK_AVAILABLE:
+                lock_key = f"lock:session:{user_id}:{target_session_id}:write"
+                with redis_lock(lock_key, timeout=5):
+                    self._save_with_seq_id(user_id, target_session_id, chat_history)
+            else:
+                # 无锁模式（仅适用于单实例部署）
+                self._save_with_seq_id(user_id, target_session_id, chat_history)
 
         except Exception as e:
             logger.error(f"保存用户 {user_id} 会话 {session_id} 文件失败:{str(e)}")
@@ -166,6 +183,34 @@ class SessionService:
 
         return formatted_sessions
 
+    def _save_with_seq_id(self, user_id: str, session_id: str, chat_history: List[Dict[str, Any]]):
+        """
+        保存历史会话（带 seq_id 支持）
+
+        在分布式锁保护下执行 Read-Modify-Write 操作：
+        1. 读取当前最大 seq_id
+        2. 为新消息分配递增的 seq_id
+        3. 写入文件
+
+        Args:
+            user_id: 用户ID
+            session_id: 会话ID
+            chat_history: 要保存的历史消息
+        """
+        # 1. 获取当前最大的 seq_id
+        max_seq_id = self._repo.get_max_seq_id(user_id, session_id)
+
+        # 2. 为所有没有 seq_id 的消息分配递增的序号
+        next_seq_id = max_seq_id + 1
+        for msg in chat_history:
+            if "seq_id" not in msg:
+                msg["seq_id"] = next_seq_id
+                next_seq_id += 1
+
+        # 3. 保存到文件
+        self._repo.save_session(user_id, session_id, chat_history)
+        logger.debug(f"会话已保存，最新 seq_id: {next_seq_id - 1}")
+
     def _init_system_msg_instruct(self, session_id) -> List[Dict[str, Any]]:
         """
          初始化一个带系统角色的消息结构
@@ -177,7 +222,8 @@ class SessionService:
         """
         return [{
             "role": "system",
-            "content": f"你是一个有记忆的智能体助手，请基于上下文历史会话用户问题 (会话ID {session_id})"
+            "content": f"你是一个有记忆的智能体助手，请基于上下文历史会话用户问题 (会话ID {session_id})",
+            "seq_id": 0  # 系统消息的 seq_id 为 0
         }]
 
     def _truncate_history(self, chat_history: List[Dict[str, Any]], max_turn: int = 3) -> List[Dict[str, Any]]:

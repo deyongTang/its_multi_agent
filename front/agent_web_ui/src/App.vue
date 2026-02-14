@@ -186,31 +186,52 @@
             <!-- 统一的消息展示区域 -->
             <div class="chat-message-container" ref="processContent">
               <div v-for="(msg, index) in chatMessages" :key="index" :class="['message-wrapper', msg.type]">
-                 <!-- 消息头/角色标识 -->
-                 <div class="message-role-label" v-if="msg.type === 'THINKING'" @click="toggleThinking(index)">
-                   <div class="thinking-header">
-                     <span class="thinking-text">{{ isProcessing && index === chatMessages.length - 1 ? '思考中...' : '思考过程' }}</span>
-                     <svg 
-                       xmlns="http://www.w3.org/2000/svg" 
-                       width="16" 
-                       height="16" 
-                       viewBox="0 0 24 24" 
-                       fill="none" 
-                       stroke="currentColor" 
-                       stroke-width="2" 
-                       stroke-linecap="round" 
+                 <!-- 用户消息 -->
+                 <div v-if="msg.type === 'user'" class="user-message-bubble">
+                   <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+                 </div>
+
+                 <!-- 思考过程 - 带折叠功能的灰色区域 -->
+                 <div v-else-if="msg.type === 'THINKING'" class="thinking-section">
+                   <div class="thinking-header" @click="toggleThinking(index)">
+                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="thinking-icon-brain">
+                       <path d="M12 2a9 9 0 0 0-9 9v4a9 9 0 0 0 18 0v-4a9 9 0 0 0-9-9z"/>
+                       <path d="M12 2v20"/>
+                       <path d="M2 11h20"/>
+                     </svg>
+                     <span class="thinking-label">{{ isProcessing && index === chatMessages.length - 1 ? '🤔 思考中...' : '💭 思考过程' }}</span>
+                     <svg
+                       xmlns="http://www.w3.org/2000/svg"
+                       width="16"
+                       height="16"
+                       viewBox="0 0 24 24"
+                       fill="none"
+                       stroke="currentColor"
+                       stroke-width="2"
+                       stroke-linecap="round"
                        stroke-linejoin="round"
-                       class="thinking-icon"
+                       class="thinking-toggle-icon"
                        :class="{ 'collapsed': msg.collapsed }"
                      >
                        <polyline points="6 9 12 15 18 9"></polyline>
                      </svg>
                    </div>
+                   <div class="thinking-content" v-show="!msg.collapsed">
+                     <div class="thinking-text" v-html="renderMarkdown(msg.content)"></div>
+                   </div>
                  </div>
-                 
-                 <!-- 消息内容 -->
-                 <div class="message-content" v-show="msg.type !== 'THINKING' || !msg.collapsed">
-                   <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+
+                 <!-- 助手回答 - 清晰的白色区域 -->
+                 <div v-else-if="msg.type === 'assistant'" class="assistant-answer-section">
+                   <div class="assistant-header">
+                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="assistant-icon">
+                       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                     </svg>
+                     <span class="assistant-label">✨ 回答</span>
+                   </div>
+                   <div class="assistant-content">
+                     <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+                   </div>
                  </div>
               </div>
             </div>
@@ -753,7 +774,7 @@ const handleServiceStation = () => {
               // 根据 kind 分发处理逻辑
               // -----------------------------------------------------------
               if (kind && text) {
-                // console.log('Processing kind:', kind, 'text:', text); // 调试日志
+                console.log('Processing kind:', kind, 'text:', text); // 调试日志
 
                 switch (kind) {
                   case 'ANSWER':
@@ -842,6 +863,23 @@ const handleServiceStation = () => {
     
     // 流式更新处理消息
     const streamTextToProcess = (text) => {
+      // 过滤掉纯JSON格式的思考过程（如意图识别结果）
+      // 检测是否为JSON对象（包含 l1_intent, l2_intent 等字段）
+      try {
+        const trimmedText = text.trim();
+        // 如果文本看起来像JSON对象，尝试解析
+        if (trimmedText.startsWith('{') && trimmedText.includes('"l1_intent"')) {
+          const parsed = JSON.parse(trimmedText);
+          // 如果成功解析且包含意图识别字段，则跳过显示
+          if (parsed.l1_intent || parsed.l2_intent) {
+            console.log('过滤掉JSON格式的意图识别结果:', parsed);
+            return; // 不显示这类内容
+          }
+        }
+      } catch (e) {
+        // 不是有效的JSON，继续正常处理
+      }
+
       // 更新统一的聊天记录
       const lastMsg = chatMessages.value[chatMessages.value.length - 1];
       if (lastMsg && lastMsg.type === 'THINKING') {
@@ -852,8 +890,8 @@ const handleServiceStation = () => {
            lastMsg.collapsed = false;
         }
       } else {
-        chatMessages.value.push({ 
-          type: 'THINKING', 
+        chatMessages.value.push({
+          type: 'THINKING',
           content: text,
           collapsed: false // 默认为展开状态
         });
@@ -1009,33 +1047,254 @@ const handleServiceStation = () => {
 </script>
 
 <style scoped>
-/* 思考过程头部样式 */
+/* ==================== 消息容器样式 ==================== */
+.chat-message-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px;
+  padding-bottom: 140px; /* 增加底部内边距，避免被输入框遮挡 */
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+.message-wrapper {
+  width: 100%;
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ==================== 用户消息样式 ==================== */
+.user-message-bubble {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 12px 18px;
+  border-radius: 18px 18px 4px 18px;
+  max-width: 70%;
+  margin-left: auto;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  word-wrap: break-word;
+}
+
+.user-message-bubble .markdown-body {
+  color: white;
+}
+
+.user-message-bubble .markdown-body * {
+  color: white !important;
+}
+
+/* ==================== 思考过程样式 ==================== */
+.thinking-section {
+  background: #fef3c7 !important;
+  border: 2px solid #fbbf24 !important;
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin: 8px 0 20px 0;
+  box-shadow: 0 2px 8px rgba(251, 191, 36, 0.15) !important;
+  position: relative;
+}
+
+.thinking-section::after {
+  content: '';
+  position: absolute;
+  bottom: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80%;
+  height: 2px;
+  background: linear-gradient(to right, transparent, #d1d5db, transparent);
+}
+
 .thinking-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
   user-select: none;
-  transition: color 0.2s;
+  padding: 6px 0;
+  transition: all 0.2s ease;
 }
 
 .thinking-header:hover {
-  color: var(--tech-text-main);
+  opacity: 0.85;
 }
 
-.thinking-text {
-  font-weight: 500;
+.thinking-icon-brain {
+  color: #b45309 !important;
+  flex-shrink: 0;
 }
 
-.thinking-icon {
+.thinking-label {
+  font-weight: 700 !important;
+  font-size: 14px !important;
+  color: #92400e !important;
+  flex: 1;
+}
+
+.thinking-toggle-icon {
   transition: transform 0.3s ease;
-  opacity: 0.7;
+  color: #b45309 !important;
+  flex-shrink: 0;
 }
 
-.thinking-icon.collapsed {
+.thinking-toggle-icon.collapsed {
   transform: rotate(-90deg);
 }
 
+.thinking-content {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 2px solid #f59e0b !important;
+}
+
+.thinking-text {
+  font-size: 14px !important;
+  color: #6b7280 !important;
+  line-height: 1.7;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-weight: 500 !important;
+  opacity: 0.85;
+}
+
+.thinking-text .markdown-body {
+  background: transparent !important;
+  color: #6b7280 !important;
+}
+
+.thinking-text .markdown-body * {
+  color: #6b7280 !important;
+  font-weight: 500 !important;
+}
+
+/* ==================== 助手回答样式 ==================== */
+.assistant-answer-section {
+  background: white;
+  border: 2px solid #e3f2fd;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin: 20px 0 8px 0;
+  box-shadow: 0 2px 12px rgba(33, 150, 243, 0.08);
+}
+
+.assistant-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #e3f2fd;
+}
+
+.assistant-icon {
+  color: #2196F3;
+  flex-shrink: 0;
+}
+
+.assistant-label {
+  font-weight: 700;
+  font-size: 16px;
+  color: #1976D2;
+}
+
+.assistant-content {
+  font-size: 16px;
+  line-height: 1.8;
+  color: #000000 !important;
+  font-weight: 600 !important;
+}
+
+.assistant-content .markdown-body {
+  background: transparent;
+  color: #000000 !important;
+}
+
+.assistant-content .markdown-body p {
+  margin: 12px 0;
+  color: #000000 !important;
+  font-weight: 600 !important;
+}
+
+.assistant-content .markdown-body h1,
+.assistant-content .markdown-body h2,
+.assistant-content .markdown-body h3 {
+  color: #000000 !important;
+  margin-top: 20px;
+  margin-bottom: 12px;
+  font-weight: 700 !important;
+}
+
+.assistant-content .markdown-body ul,
+.assistant-content .markdown-body ol {
+  margin: 12px 0;
+  padding-left: 28px;
+  color: #000000 !important;
+}
+
+.assistant-content .markdown-body li {
+  margin: 6px 0;
+  color: #000000 !important;
+  font-weight: 600 !important;
+}
+
+.assistant-content .markdown-body code {
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #000000 !important;
+  font-weight: 600 !important;
+}
+
+.assistant-content .markdown-body pre {
+  background: #f5f5f5;
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.assistant-content .markdown-body pre code {
+  background: transparent;
+  padding: 0;
+  color: #000000 !important;
+  font-weight: 600 !important;
+}
+
+/* ==================== 滚动条美化 ==================== */
+.chat-message-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-message-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.chat-message-container::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+.chat-message-container::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* ==================== 应用容器样式 ==================== */
 .app-container {
   width: 100%;
   height: 100%;
@@ -1043,13 +1302,13 @@ const handleServiceStation = () => {
   flex-direction: column;
   gap: 10px;
   padding: 5px;
-  padding-bottom: 10px; /* 减小下边距 */
+  padding-bottom: 10px;
   box-sizing: border-box;
   min-height: 100vh;
-  overflow: hidden; /* 防止页面整体滚动 */
+  overflow: hidden;
 }
 
-/* 主内容区域布局 */
+/* ==================== 主内容区域布局 ==================== */
 .main-content {
   display: flex;
   flex: 1;
@@ -1298,12 +1557,11 @@ const handleServiceStation = () => {
   padding: 15px;
   display: flex;
   flex-direction: column;
-  /* background-color: #f5f5f5; */
-  overflow: visible;
-  height: auto;
+  overflow: hidden;
+  height: 100%;
   box-sizing: border-box;
   border-radius: 8px;
-  border: 1px solid #fff; /* 添加默认边框 */
+  border: 1px solid #fff;
 }
 
 /* 程序处理中时的渐变闪烁动画 */

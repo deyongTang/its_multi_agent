@@ -34,7 +34,7 @@ def init_logger():
         # 1. 初始化 ES 客户端
         es_instance = None
         try:
-            from infrastructure.es_client import ESClient
+            from knowledge.infrastructure.es_client import ESClient
             es_client = ESClient()
             es_instance = es_client.client
         except Exception as e:
