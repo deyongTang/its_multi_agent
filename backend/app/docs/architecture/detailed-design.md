@@ -34,7 +34,7 @@
 graph TD
     User[用户终端] --> WAF[WAF/API Gateway]
     WAF --> Auth[认证鉴权 & 限流]
-    Auth --> Guard_In[输入安全围栏 (PII过滤/注入检测)]
+    Auth --> Guard_In["输入安全围栏 (PII过滤/注入检测)"]
     
     subgraph "Core Orchestration Engine (Python)"
         Guard_In --> Router{意图路由 Agent}
