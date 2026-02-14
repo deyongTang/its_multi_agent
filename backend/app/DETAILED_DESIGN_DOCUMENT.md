@@ -95,25 +95,24 @@ graph TD
 
 ### 3.2 主动检索协议 (Active Retrieval Protocol)
 
-Agent 不再是被动的“查询者”，而是拥有“元认知”的**策略制定者**。
+Agent 不再是被动的“查询者”，而是拥有“元认知”的**策略制定者**。它负责告诉知识库服务“我要找什么类型的资料”，而不是“怎么找”。
 
 #### 3.2.1 动态策略矩阵
-在 `STRATEGY_GEN` 阶段，Agent 根据意图类型输出检索配置：
+在 `STRATEGY_GEN` 阶段，Agent 根据意图类型输出业务层检索配置：
 
-| 场景类型 | Keyword 权重 | Vector 权重 | 召回策略 | 适用案例 |
-| :--- | :--- | :--- | :--- | :--- |
-| **精确报错** | **0.9** | 0.1 | 仅搜 Title/ErrorCode 字段 | "错误码 0x8004005" |
-| **模糊咨询** | 0.2 | **0.8** | 全文语义检索 | "电脑运行很慢，卡顿" |
-| **组合查询** | 0.5 | 0.5 | 混合检索 + RRF 融合 | "Win10 如何配置静态IP" |
-| **已知实体** | 0.7 | 0.3 | 实体过滤 + 向量检索 | "ThinkPad X1 无法充电" |
+| 场景类型 | 意图标签 (Query Tags) | 业务目标 | 适用案例 |
+| :--- | :--- | :--- | :--- |
+| **精确报错** | `["ErrorCode", "ExactMatch"]` | 精确命中特定错误码解决方案 | "错误码 0x8004005" |
+| **模糊咨询** | `["SemanticSearch", "Broad"]` | 召回语义相关的故障现象 | "电脑运行很慢，卡顿" |
+| **组合查询** | `["Hybrid", "HowTo"]` | 综合检索操作指南 | "Win10 如何配置静态IP" |
+| **已知实体** | `["EntityFilter", "Product"]` | 限定在特定产品线下检索 | "ThinkPad X1 无法充电" |
 
-#### 3.2.2 接口 Schema
+#### 3.2.2 接口 Schema (Business Layer)
 ```python
 class RetrievalStrategy(BaseModel):
-    keyword_weight: float = Field(..., ge=0, le=1)
-    vector_weight: float = Field(..., ge=0, le=1)
+    intent_type: str = Field(..., description="业务意图类型，如 tech_issue")
+    query_tags: List[str] = Field(default=[], description="业务检索标签，指导知识库内部策略")
     filters: Dict[str, Any] = {} # e.g. {"product_line": "server"}
-    enable_rerank: bool = True
     top_k: int = 5
 ```
 

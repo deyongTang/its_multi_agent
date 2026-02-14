@@ -10,7 +10,11 @@ pystun3
 langsmith
 bcrypt==4.0.1
 
+# Redis 支持
+redis>=5.0.0
+
 # LangGraph 工作流引擎
 langgraph>=0.2.0
 langchain-core>=0.3.0
 langchain-openai>=0.2.0
+langgraph-checkpoint-redis>=0.1.0

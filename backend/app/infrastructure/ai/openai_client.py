@@ -1,8 +1,18 @@
+"""
+OpenAI 客户端封装模块（双引擎版本）
+
+同时提供两套模型客户端：
+1. LangChain 模型 - 用于 LangGraph 工作流
+2. OpenAI Agents SDK 模型 - 用于旧版 Orchestrator Agent
+
+两者互不影响，各自提供服务
+"""
 from agents import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
+from langchain_openai import ChatOpenAI
 from config.settings import settings
-from typing import Any, Optional
-import inspect
+
+# ==================== 配置信息 ====================
 
 # 硅基流动配置(主模型)
 SF_API_KEY = settings.SF_API_KEY
@@ -15,7 +25,8 @@ AL_BAILIAN_BASE_URL = settings.AL_BAILIAN_BASE_URL
 SUB_MODEL_NAME = settings.SUB_MODEL_NAME
 
 
-# 模型名称映射：将带斜杠的模型名转换为 LangSmith 友好的格式
+# ==================== 工具函数 ====================
+
 def normalize_model_name(model_name: str) -> str:
     """
     将模型名称标准化为 LangSmith 可识别的格式
@@ -52,31 +63,63 @@ class ModelNameMappingClient(AsyncOpenAI):
         self.chat.completions.create = wrapped_chat_create
 
 
+# ==================== OpenAI Agents SDK 模型（用于旧版 Orchestrator） ====================
+
 # 创建模型客户端（使用自定义包装器）
 # 主模型客户端(协调Agent使用)
-main_model_client = ModelNameMappingClient(
+agents_main_model_client = ModelNameMappingClient(
     original_model_name=MAIN_MODEL_NAME,
     base_url=SF_BASE_URL,
     api_key=SF_API_KEY
 )
 
 # 子模型客户端(干活的子Agent使用)
-sub_model_client = ModelNameMappingClient(
+agents_sub_model_client = ModelNameMappingClient(
     original_model_name=SUB_MODEL_NAME,
     base_url=AL_BAILIAN_BASE_URL,
     api_key=AL_BAILIAN_API_KEY
 )
 
-
-# 创建主调度模型
-# 使用标准化的模型名称（LangSmith 友好），实际请求时会被包装器替换为原始名称
-main_model = OpenAIChatCompletionsModel(
-    model=normalize_model_name(MAIN_MODEL_NAME),  # LangSmith 看到: qwen3-32b
-    openai_client=main_model_client
+# 创建主调度模型（OpenAI Agents SDK）
+agents_main_model = OpenAIChatCompletionsModel(
+    model=normalize_model_name(MAIN_MODEL_NAME),
+    openai_client=agents_main_model_client
 )
 
-# 创建子调度模型
-sub_model = OpenAIChatCompletionsModel(
-    model=normalize_model_name(SUB_MODEL_NAME),  # LangSmith 看到: qwen3-max
-    openai_client=sub_model_client
+# 创建子调度模型（OpenAI Agents SDK）
+agents_sub_model = OpenAIChatCompletionsModel(
+    model=normalize_model_name(SUB_MODEL_NAME),
+    openai_client=agents_sub_model_client
 )
+
+
+# ==================== LangChain 模型（用于 LangGraph 工作流） ====================
+
+# 创建主模型（用于协调 Agent）
+main_model = ChatOpenAI(
+    model=MAIN_MODEL_NAME,
+    openai_api_key=SF_API_KEY,
+    openai_api_base=SF_BASE_URL,
+    temperature=0.7,
+    streaming=True,  # 支持流式输出
+)
+
+# 创建子模型（用于干活的子 Agent）
+sub_model = ChatOpenAI(
+    model=SUB_MODEL_NAME,
+    openai_api_key=AL_BAILIAN_API_KEY,
+    openai_api_base=AL_BAILIAN_BASE_URL,
+    temperature=0.7,
+    streaming=True,
+)
+
+
+# ==================== 导出说明 ====================
+#
+# 使用指南：
+# 1. LangGraph 工作流使用：main_model, sub_model
+# 2. OpenAI Agents SDK 使用：agents_main_model, agents_sub_model
+#
+# 示例：
+#   from infrastructure.ai.openai_client import main_model  # LangGraph
+#   from infrastructure.ai.openai_client import agents_main_model  # Agents SDK

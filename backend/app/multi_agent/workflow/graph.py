@@ -1,19 +1,24 @@
 """
-LangGraph Workflow Graph Definition (v1.3)
+LangGraph Workflow Graph Definition (v1.4 - Explicit Sequential Pipeline)
 
-Implements the full "Industrial-Grade" orchestration logic:
-- Intent Classification
-- Slot Filling Loop (with User Interrupt)
-- Active Retrieval (Strategy Generation)
-- Parallel Execution (ES, Baidu, Tools)
-- Result Merge & Verification
-- Retry Loop (Query Expansion)
-- Human Escalation
+Implements the explicit fallback logic:
+- Intent -> Strategy -> Dispatch
+- Dispatch (Tech) -> KB -> Check KB -> (if miss) -> Web
+- Dispatch (Info) -> Web
+- Dispatch (Map) -> Tools
 """
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from multi_agent.workflow.state import AgentState
+
+# Redis Checkpointer 支持
+try:
+    from langgraph.checkpoint.redis import RedisSaver
+    from infrastructure.redis_client import redis_client
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
 
 # Import Nodes
 from multi_agent.workflow.nodes.intent_node import node_intent
@@ -23,15 +28,19 @@ from multi_agent.workflow.nodes.general_chat_node import node_general_chat
 
 # Phase 2 Nodes
 from multi_agent.workflow.nodes.strategy_gen_node import node_strategy_gen
-from multi_agent.workflow.nodes.search_nodes import node_search_es, node_search_baidu, node_search_tools
-from multi_agent.workflow.nodes.merge_verify_nodes import node_merge_rerank, node_verify
+from multi_agent.workflow.nodes.search_nodes import node_query_knowledge, node_search_web, node_query_local_tools
+from multi_agent.workflow.nodes.merge_verify_nodes import node_merge_results, node_verify
 from multi_agent.workflow.nodes.action_nodes import node_expand_query, node_escalate, node_generate_report
 
 # Import Edges
 from multi_agent.workflow.edges import (
     route_intent,
     route_slot_check,
-    route_parallel_execution,
+)
+# 新的显式路由器
+from multi_agent.workflow.edges.routers_phase2 import (
+    route_dispatch,
+    route_kb_check,
     route_verify_result
 )
 
@@ -41,30 +50,25 @@ def create_workflow_graph():
     """
     Builds the compiled LangGraph application.
     """
-    logger.info("Building LangGraph v1.3 Workflow...")
+    logger.info("Building LangGraph v1.4 Workflow (Explicit Pipeline)...")
     
     workflow = StateGraph(AgentState)
     
     # --- 1. Add Nodes ---
-    # Core Logic
     workflow.add_node("intent", node_intent)
     workflow.add_node("slot_filling", node_slot_filling)
     workflow.add_node("ask_user", node_ask_user)
     workflow.add_node("general_chat", node_general_chat)
     
-    # Retrieval & Action Logic
     workflow.add_node("strategy_gen", node_strategy_gen)
     
-    # Parallel Search Nodes
-    workflow.add_node("search_es", node_search_es)
-    workflow.add_node("search_baidu", node_search_baidu)
-    workflow.add_node("search_tools", node_search_tools)
+    workflow.add_node("query_knowledge", node_query_knowledge)
+    workflow.add_node("search_web", node_search_web)
+    workflow.add_node("query_local_tools", node_query_local_tools)
     
-    # Merge & Verify
-    workflow.add_node("merge_rerank", node_merge_rerank)
+    workflow.add_node("merge_results", node_merge_results)
     workflow.add_node("verify", node_verify)
     
-    # Post-Process
     workflow.add_node("expand_query", node_expand_query)
     workflow.add_node("escalate", node_escalate)
     workflow.add_node("generate_report", node_generate_report)
@@ -74,13 +78,13 @@ def create_workflow_graph():
     
     # --- 3. Define Edges & Routing ---
     
-    # Intent Router
+    # Intent Processing
     workflow.add_conditional_edges(
         "intent",
         route_intent,
         {
             "general_chat": "general_chat",
-            "slot_filling": "slot_filling",  # Tech/POI/Service go here
+            "slot_filling": "slot_filling",
         }
     )
     
@@ -89,54 +93,66 @@ def create_workflow_graph():
         "slot_filling",
         route_slot_check,
         {
-            "ask_user": "ask_user",         # Loop back for more info
-            "strategy_gen": "strategy_gen"  # Proceed if slots full
+            "ask_user": "ask_user",
+            "strategy_gen": "strategy_gen"
         }
     )
     
-    # Strategy -> Parallel Execution (Fan-Out)
+    # --- Explicit Dispatching (No more parallel fan-out) ---
     workflow.add_conditional_edges(
         "strategy_gen",
-        route_parallel_execution,
-        # The router returns a list of node names to execute
-        ["search_es", "search_baidu", "search_tools"] 
+        route_dispatch,
+        {
+            "query_knowledge": "query_knowledge",
+            "search_web": "search_web",
+            "query_local_tools": "query_local_tools"
+        }
     )
     
-    # Fan-In (All search nodes go to Merge)
-    workflow.add_edge("search_es", "merge_rerank")
-    workflow.add_edge("search_baidu", "merge_rerank")
-    workflow.add_edge("search_tools", "merge_rerank")
+    # --- Sequential Fallback Logic ---
     
-    # Merge -> Verify
-    workflow.add_edge("merge_rerank", "verify")
+    # 1. Knowledge Base Path: KB -> Check -> (Web OR Merge)
+    workflow.add_conditional_edges(
+        "query_knowledge",
+        route_kb_check,
+        {
+            "merge_results": "merge_results",
+            "search_web": "search_web"  # 显式指向 Web 兜底
+        }
+    )
     
-    # Verification Router (Retry Logic)
+    # 2. Web Search Path: Web -> Merge
+    workflow.add_edge("search_web", "merge_results")
+    
+    # 3. Tools Path: Tools -> Merge
+    workflow.add_edge("query_local_tools", "merge_results")
+    
+    # --- Verification & Reporting ---
+    
+    workflow.add_edge("merge_results", "verify")
+    
     workflow.add_conditional_edges(
         "verify",
         route_verify_result,
         {
             "generate_report": "generate_report",
-            "expand_query": "expand_query",
             "escalate": "escalate"
         }
     )
     
-    # Retry Loop
-    workflow.add_edge("expand_query", "strategy_gen")
-    
     # End Nodes
     workflow.add_edge("general_chat", END)
-    workflow.add_edge("ask_user", END) # Interrupt point
+    workflow.add_edge("ask_user", END)
     workflow.add_edge("generate_report", END)
     workflow.add_edge("escalate", END)
     
     # --- 4. Compile ---
-    checkpointer = MemorySaver()
-    
-    app = workflow.compile(
-        checkpointer=checkpointer,
-        interrupt_before=["ask_user"]
-    )
-    
-    logger.info("LangGraph v1.3 Compiled Successfully.")
+    if REDIS_AVAILABLE:
+        checkpointer = RedisSaver(redis_client) if REDIS_AVAILABLE else MemorySaver()
+    else:
+        checkpointer = MemorySaver()
+
+    app = workflow.compile(checkpointer=checkpointer)
+
+    logger.info("LangGraph v1.4 Compiled Successfully.")
     return app

@@ -6,8 +6,7 @@ from infrastructure.logging.logger import logger
 from config.settings import settings
 
 
-@function_tool
-async def query_knowledge(question: str) -> Dict:
+async def query_knowledge_raw(question: str) -> Dict:
     """
        查询电脑问题知识库服务,用于检索与用户问题相关的技术文档或解决方案。
 
@@ -59,12 +58,4 @@ async def query_knowledge(question: str) -> Dict:
             logger.error(f"未知错误:{str(e)}")
             return {"status": "error", "error_msg": f"未知错误:{e}"}
 
-
-async def main():
-    result = await query_knowledge(question="电脑不能开机怎么解决?")
-    print(result)
-
-
-# 测试接口调用
-if __name__ == '__main__':
-    asyncio.run(main())
+query_knowledge = function_tool(query_knowledge_raw)

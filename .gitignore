@@ -1,0 +1,94 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+backend/app/logs/
+backend/knowledge/logs/
+backend/knowledge/api/logs/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# ChromaDB
+backend/knowledge/chroma_kb/
+
+# LangGraph
+backend/app/.langgraph_api/
+*.langgraph_api/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dist/
+.cache/
+
+# User data
+backend/app/user_memories/
+
+# Temporary files
+*.tmp
+*.temp
+.claude/
+
+# Excalidraw
+*.excalidraw
+
+# Test files (optional - 根据需要调整)
+test_*.py
+*_test.py
+
+# Documentation (临时生成的文档)
+*_PLAN.md
+*_SUMMARY.md
+*_AUDIT*.md
+*_DESIGN_SPECIFICATION.md
+*_UPGRADE_PLAN.md
+*_OPTIMIZATION_PLAN.md
+开发日志_*.md
+
+# Deployment scripts (如果不需要提交)
+deploy/*.sql

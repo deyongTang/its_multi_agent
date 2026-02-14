@@ -23,8 +23,6 @@ async def node_general_chat(state: AgentState) -> AgentState:
     Returns:
         更新后的状态（包含回复消息）
     """
-    trace_id = state.get("trace_id", "-")
-
     try:
         # 1. 获取用户消息
         messages = state.get("messages", [])
@@ -37,7 +35,7 @@ async def node_general_chat(state: AgentState) -> AgentState:
         last_message = messages[-1]
         user_query = last_message.content if hasattr(last_message, 'content') else str(last_message)
 
-        logger.info(f"[{trace_id}] 处理闲聊: {user_query[:50]}...")
+        logger.info(f"处理闲聊: {user_query[:50]}...")
 
         # 2. 构建闲聊 Prompt
         chat_prompt = SystemMessage(content="""你是联想智能客服助手。用户正在与你闲聊，请：
@@ -63,7 +61,7 @@ async def node_general_chat(state: AgentState) -> AgentState:
 
         reply = response.content.strip()
 
-        logger.info(f"[{trace_id}] 闲聊回复生成完成")
+        logger.info("闲聊回复生成完成")
 
         # 4. 更新状态
         return {
@@ -72,7 +70,7 @@ async def node_general_chat(state: AgentState) -> AgentState:
         }
 
     except Exception as e:
-        logger.error(f"[{trace_id}] 闲聊节点异常: {e}")
+        logger.error(f"闲聊节点异常: {e}")
         state.setdefault("error_log", []).append(f"General chat error: {str(e)}")
 
         # 降级：使用通用回复

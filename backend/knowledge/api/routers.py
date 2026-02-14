@@ -324,33 +324,74 @@ async def query_knowledge(
 
             logger.info(f"✨ 重写后问题: {rewritten_query}")
 
-            # 2. 使用 ES 混合检索（新方案 - RAG V2.0）
-            es_results = await run_in_threadpool(
-                get_es_retrieval_service().retrieve,
-                rewritten_query,
-                top_k=5,  # 限制为 5 个文档
+            # 2. 分层检索策略 (Tiered Retrieval)
+            # 目标：将原始问题的检索结果作为“核心分析源”，重写问题的结果作为“参考资料”
+            # 避免将推断性内容与事实性指令混淆
+            
+            es_service = get_es_retrieval_service()
+            
+            # (A) 核心层：基于原始问题检索 (Direct Matches)
+            # 使用 RRF (BM25 + Vector) 保证原始意图的精确性和语义性
+            results_original = await run_in_threadpool(
+                es_service.retrieve,
+                request.question,
+                top_k=5,
                 return_full_content=True
             )
+            logger.info(f"📌 [核心层] 原始问题检索到 {len(results_original)} 个文档")
 
-            # 将 ES 结果转换为 LangChain Document 格式
-            from langchain_core.documents import Document
-            docs = [
-                Document(
-                    page_content=result.get("full_content", result.get("content", "")),
-                    metadata={
-                        "knowledge_no": result.get("knowledge_no"),
-                        "title": result.get("title"),
-                        "score": result.get("score", 0)
-                    }
+            # (B) 参考层：基于重写问题检索 (Supplementary Matches)
+            results_rewritten = []
+            if rewritten_query and rewritten_query != request.question:
+                results_rewritten = await run_in_threadpool(
+                    es_service.retrieve,
+                    rewritten_query,
+                    top_k=5,
+                    return_full_content=True
                 )
-                for result in es_results
-            ]
+                logger.info(f"📎 [参考层] 重写问题检索到 {len(results_rewritten)} 个文档")
 
-            logger.info(f"📚 ES 检索到 {len(docs)} 个文档")
-            logger.info(f"🤖 开始生成答案 | 上下文文档数: {len(docs)}")
+            # 3. 结果融合与标记
+            from langchain_core.documents import Document
+            
+            final_docs = []
+            seen_knowledge_nos = set()
 
-            # 3. 流式生成答案
-            for chunk in query_service.generate_answer_stream(request.question, docs):
+            # 处理核心层文档
+            for res in results_original:
+                kno = res.get("knowledge_no")
+                if kno not in seen_knowledge_nos:
+                    seen_knowledge_nos.add(kno)
+                    final_docs.append(Document(
+                        page_content=res.get("full_content", res.get("content", "")),
+                        metadata={
+                            "knowledge_no": kno,
+                            "title": res.get("title"),
+                            "score": res.get("score", 0),
+                            "source_type": "original"  # 标记为核心源
+                        }
+                    ))
+
+            # 处理参考层文档 (去重)
+            for res in results_rewritten:
+                kno = res.get("knowledge_no")
+                if kno not in seen_knowledge_nos:
+                    seen_knowledge_nos.add(kno)
+                    final_docs.append(Document(
+                        page_content=res.get("full_content", res.get("content", "")),
+                        metadata={
+                            "knowledge_no": kno,
+                            "title": res.get("title"),
+                            "score": res.get("score", 0),
+                            "source_type": "rewritten"  # 标记为参考源
+                        }
+                    ))
+
+            logger.info(f"📚 最终构建上下文: {len(final_docs)} 个文档 (Original: {len(results_original)}, Rewritten: {len(results_rewritten)})")
+            logger.info(f"🤖 开始生成答案")
+
+            # 4. 流式生成答案
+            for chunk in query_service.generate_answer_stream(request.question, final_docs):
                 # 以 SSE 格式输出
                 yield f"data: {chunk}\n\n"
 

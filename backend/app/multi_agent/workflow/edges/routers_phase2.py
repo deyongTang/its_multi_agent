@@ -1,62 +1,58 @@
 from typing import Literal, List
 from multi_agent.workflow.state import AgentState
+from infrastructure.logging.logger import logger
 
-def route_parallel_execution(state: AgentState) -> List[str]:
+def route_dispatch(state: AgentState) -> Literal["query_knowledge", "search_web", "query_local_tools"]:
     """
-    Parallel Execution Router (Fan-Out)
+    分发路由器 (Primary Source Dispatcher)
     
-    Determines which search nodes to execute in parallel based on the strategy.
-    Returns a list of node names.
+    根据意图直接分发到首选数据源，不再经过复杂的策略计算。
     """
-    strategy = state.get("retrieval_strategy")
-    if not strategy:
-        # Fallback if no strategy (shouldn't happen in normal flow)
-        return ["search_tools"]
+    intent = state.get("current_intent")
+    
+    logger.info(f"分发路由: 意图='{intent}'")
+
+    # 1. 技术问题 -> 知识库 (KB First)
+    if intent == "tech_issue":
+        return "query_knowledge"
         
-    targets = []
-    
-    # Check weights to decide sources
-    # In v1.3 design, we fan-out to all relevant sources defined in the strategy
-    # For now, we default to activating all available search nodes 
-    # and let them filter internally based on the strategy if needed,
-    # or we can explicitly check strategy contents here.
-    
-    # Active Retrieval Protocol Logic:
-    # If explicit error code -> lean towards KB (ES)
-    # If vague -> lean towards Vector (ES) + Web (Baidu)
-    # If POI/Service -> lean towards Tools
-    
-    # For robust implementation, we trigger all configured searchers
-    # The Merge Node will handle filtering empty results.
-    targets.append("search_es")
-    targets.append("search_baidu") 
-    targets.append("search_tools")
-    
-    return targets
+    # 2. 资讯/未知 -> 网络搜索
+    elif intent == "search_info" or intent == "unknown":
+        return "search_web"
+        
+    # 3. 位置服务 -> 本地工具
+    elif intent in ["service_station", "poi_navigation"]:
+        return "query_local_tools"
+        
+    # 兜底：默认去网络
+    return "search_web"
 
-def route_verify_result(state: AgentState) -> Literal["generate_report", "expand_query", "escalate"]:
+def route_kb_check(state: AgentState) -> Literal["merge_results", "search_web"]:
     """
-    Verification Router
+    KB 结果检查路由器 (Explicit Fallback Router)
     
-    Decides whether to:
-    1. Generate final report (Success)
-    2. Expand query and retry (Partial/No result & Retry < Limit)
-    3. Escalate to human (No result & Retry >= Limit)
+    显式编排：KB 搜完后，直接在这里判断。
+    - 有结果 -> 去汇总 (merge_results)
+    - 没结果 -> 去网络搜索 (search_web)
     """
-    retry_count = state.get("retry_count", 0)
     docs = state.get("retrieved_documents", [])
     
-    # Thresholds (can be moved to config)
-    MAX_RETRIES = 3
+    if docs:
+        logger.info(f"KB 检索成功 ({len(docs)} 条)，进入汇总")
+        return "merge_results"
+    else:
+        logger.warning("KB 检索无结果 (Miss)，显式触发网络搜索兜底 (Fallback -> Web)")
+        return "search_web"
+
+def route_verify_result(state: AgentState) -> Literal["generate_report", "escalate"]:
+    """
+    最终结果校验
+    """
+    docs = state.get("retrieved_documents", [])
     
-    # Simple check: do we have any documents?
-    # In future, add 'confidence_score' check from the Verify Node
-    has_results = len(docs) > 0
-    
-    if has_results:
+    if docs:
         return "generate_report"
     
-    if retry_count >= MAX_RETRIES:
-        return "escalate"
-    
-    return "expand_query"
+    # 如果 Web 搜完还是空的，或者 KB->Web 还是空的，直接转人工
+    # 不再进行循环重试
+    return "escalate"

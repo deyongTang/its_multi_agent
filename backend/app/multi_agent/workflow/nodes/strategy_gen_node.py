@@ -1,45 +1,36 @@
-from langchain_core.messages import ToolMessage
+"""
+策略生成节点 (node_strategy_gen) - Active Retrieval Protocol
+
+职责：
+1. 根据 L2 意图，生成检索参数 (Query Expansion/Rewriting)。
+2. 【V3变更】不再负责源切换逻辑，源切换由 Graph 拓扑显式控制。
+"""
+
 from multi_agent.workflow.state import AgentState, RetrievalStrategy
 from infrastructure.logging.logger import logger
 
 def node_strategy_gen(state: AgentState) -> dict:
-    """
-    Strategy Generation Node
-    
-    Implements Active Retrieval Protocol:
-    1. Analyzes intent & slots
-    2. Generates dynamic weights for ES (Keyword vs Vector)
-    3. Configures search filters
-    """
     intent = state.get("current_intent")
     slots = state.get("slots", {})
+    retry_count = state.get("retry_count", 0)
     
-    logger.info(f"Generating strategy for intent: {intent}, slots: {slots}")
+    logger.info(f"正在制定检索策略 (V3 - Explicit): 意图={intent}")
     
-    # Default Strategy
     strategy: RetrievalStrategy = {
-        "intent_type": intent or "general",
-        "keyword_weight": 0.5,
-        "vector_weight": 0.5,
+        "intent_type": intent or "unknown",
+        "query_tags": [],
         "search_kwargs": {}
     }
     
-    # Dynamic Logic (Hardcoded rules as per Design v1.3)
-    
-    # Case 1: Technical Issue with explicit Error Code
-    if intent == "technical_issue" and "error_code" in slots:
-        strategy["keyword_weight"] = 0.9
-        strategy["vector_weight"] = 0.1
-        strategy["search_kwargs"]["filter_type"] = "troubleshooting"
-        
-    # Case 2: Technical Issue with vague description
-    elif intent == "technical_issue" and "error_phenomenon" in slots:
-        strategy["keyword_weight"] = 0.3
-        strategy["vector_weight"] = 0.7
-        
-    # Case 3: POI/Service (Lean towards tools)
-    elif intent in ["poi_navigation", "service_station"]:
-        strategy["keyword_weight"] = 0.8 # Names are specific
-        strategy["vector_weight"] = 0.2
-        
+    # 填充业务参数（如时间范围、限制条数等）
+    if intent == "tech_issue":
+        # 提取关键设备信息作为 tag
+        if "device_model" in slots:
+            strategy["query_tags"].append(slots["device_model"])
+            
+    # 如果是重试，标记需要扩展查询 (Query Expansion)
+    # 具体怎么扩展由各 Search Node 内部处理（例如调用 LLM 改写 Query）
+    if retry_count > 0:
+        strategy["search_kwargs"]["expand_query"] = True
+
     return {"retrieval_strategy": strategy}
