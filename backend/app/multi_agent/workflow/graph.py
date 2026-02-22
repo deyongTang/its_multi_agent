@@ -30,7 +30,7 @@ from multi_agent.workflow.nodes.general_chat_node import node_general_chat
 from multi_agent.workflow.nodes.strategy_gen_node import node_strategy_gen
 from multi_agent.workflow.nodes.search_nodes import node_query_knowledge, node_search_web, node_query_local_tools
 from multi_agent.workflow.nodes.merge_verify_nodes import node_merge_results, node_verify
-from multi_agent.workflow.nodes.action_nodes import node_expand_query, node_escalate, node_generate_report
+from multi_agent.workflow.nodes.action_nodes import node_escalate, node_generate_report
 
 # Import Edges
 from multi_agent.workflow.edges import (
@@ -68,8 +68,7 @@ def create_workflow_graph():
     
     workflow.add_node("merge_results", node_merge_results)
     workflow.add_node("verify", node_verify)
-    
-    workflow.add_node("expand_query", node_expand_query)
+
     workflow.add_node("escalate", node_escalate)
     workflow.add_node("generate_report", node_generate_report)
     
