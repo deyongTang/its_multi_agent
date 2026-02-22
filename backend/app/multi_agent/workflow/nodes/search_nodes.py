@@ -53,21 +53,23 @@ async def node_search_web(state: AgentState) -> dict:
 
     try:
         mcp_client = get_search_mcp_client()
-        result = await mcp_client.call_tool("web_search", {"query": user_query})
-        
+        result = await mcp_client.call_tool("bailian_web_search", {"query": user_query})
+        logger.info(f"[Web Search] result: {result}")
+
         # 解析 MCP 返回的 TextContent
         content_text = result.content[0].text
         data = json.loads(content_text)
-        
-        results = data.get("search_results", [])
+
+        results = data.get("pages", data.get("search_results", []))
         formatted_results = [
-            {"source": "WebSearch", "content": r.get("content", ""), "title": r.get("title", "")}
+            {"source": "WebSearch", "content": r.get("snippet", r.get("content", "")), "title": r.get("title", "")}
             for r in results[:3]
         ]
-        
+
         return {"retrieved_documents": formatted_results}
     except Exception as e:
-        logger.error(f"[Web Search] Exception: {e}")
+        logger.error(f"[Web Search] MCP 服务异常: {type(e).__name__}: {e}")
+        logger.warning("[Web Search] MCP 服务不可用，返回空结果（将触发人工升级）")
         return {"retrieved_documents": []}
 
 async def node_query_local_tools(state: AgentState) -> dict:

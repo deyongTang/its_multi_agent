@@ -14,6 +14,7 @@
 
 | 文档 | 说明 |
 | :--- | :--- |
+| [system-overview.md](guides/system-overview.md) | 系统业务介绍（定位、两大子系统、业务场景、架构哲学） |
 | [startup.md](guides/startup.md) | 系统完整启动流程详解（6 个阶段、常见问题排查、启动优化建议） |
 | [tools-and-mcp.md](guides/tools-and-mcp.md) | Tools 与 MCP 使用指南（核心概念、对比分析、决策树、实战案例） |
 | [session-persistence.md](guides/session-persistence.md) | 会话持久化架构设计与部署指南（双层存储、Redis 分布式锁、部署步骤） |
