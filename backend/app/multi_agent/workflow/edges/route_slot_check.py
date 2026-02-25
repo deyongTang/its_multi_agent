@@ -29,6 +29,6 @@ def route_slot_check(state: AgentState) -> str:
         logger.info(f"槽位不完整，进入追问流程: {missing_slots}")
         return "ask_user"
 
-    # 槽位完整，进入策略生成阶段
-    logger.info("槽位完整，进入策略生成阶段")
-    return "strategy_gen"
+    # 槽位完整，进入检索子图
+    logger.info("槽位完整，进入检索子图")
+    return "retrieval"

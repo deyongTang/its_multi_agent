@@ -26,7 +26,6 @@ class WorkflowRunner:
         user_query: str,
         user_id: str,
         session_id: str,
-        thread_id: str = None,
     ) -> Dict[str, Any]:
         """
         运行工作流（非流式）
@@ -43,14 +42,9 @@ class WorkflowRunner:
         # 1. 从上下文变量获取 trace_id
         trace_id = trace_id_var.get()
 
-        # 2. 如果没有 thread_id，生成确定性的 ID (绑定 session_id)
-        if not thread_id:
-            # 【关键修正】企业级实践：thread_id 必须是确定性的，不能使用 uuid
-            thread_id = f"thread_{user_id}_{session_id}"
+        logger.info(f"开始运行工作流")
 
-        logger.info(f"开始运行工作流，thread_id: {thread_id}")
-
-        # 3. 构建初始状态
+        # 2. 构建初始状态
         initial_state: AgentState = {
             "messages": [HumanMessage(content=user_query)],
             "session_id": session_id,
@@ -61,25 +55,14 @@ class WorkflowRunner:
             "slots": {},
             "missing_slots": [],
             "ask_user_count": 0,
-            "retrieval_strategy": None,
             "retrieved_documents": [],
-            "steps": [],
-            "error_log": [],
-            "retry_count": 0,
             "need_human_help": False,
             "final_report": None,
         }
 
-        # 4. 配置运行参数（包含 thread_id 用于持久化）
-        config = {
-            "configurable": {
-                "thread_id": thread_id
-            }
-        }
-
-        # 5. 运行工作流（LangSmith 会自动追踪）
+        # 3. 运行工作流
         try:
-            final_state = await self.graph.ainvoke(initial_state, config)
+            final_state = await self.graph.ainvoke(initial_state)
             logger.info("工作流运行完成")
             return final_state
 
@@ -109,70 +92,51 @@ class WorkflowRunner:
             LangGraph 事件流
         """
         trace_id = trace_id_var.get()
-        if not thread_id:
-            thread_id = f"thread_{user_id}_{session_id}"
+        config = {}
 
-        config = {"configurable": {"thread_id": thread_id}}
+        # 转换历史对话为 LangChain 格式
+        messages = []
+        if chat_history:
+            for msg in chat_history:
+                role = msg.get("role")
+                content = msg.get("content", "")
+                if role == "user":
+                    messages.append(HumanMessage(content=content))
+                elif role == "assistant":
+                    messages.append(AIMessage(content=content))
 
-        # 1. 检查是否有 Checkpointer 保存的状态
-        try:
-            existing_state = self.graph.get_state(config)
-            has_checkpoint = existing_state and existing_state.values
-        except Exception as e:
-            logger.warning(f"获取 Checkpointer 状态失败: {e}")
-            has_checkpoint = False
+        messages.append(HumanMessage(content=user_query))
+        logger.info(f"传入历史消息数: {len(messages)}")
 
-        if has_checkpoint:
-            # 2. 有 Checkpoint：追加新消息，继续执行
-            logger.info(f"从 Checkpointer 恢复状态，thread_id: {thread_id}")
-            self.graph.update_state(
-                config,
-                {"messages": [HumanMessage(content=user_query)]}
-            )
-            # 继续执行（不传 initial_state）
-            async for event in self.graph.astream_events(None, config, version="v2"):
-                yield event
-        else:
-            # 3. 没有 Checkpoint：初始化状态
-            logger.info(f"初始化新工作流，thread_id: {thread_id}")
+        # 从历史推断追问状态：若历史最后一条 assistant 消息带有 is_ask_user 标记，说明上一轮在追问
+        is_followup = bool(chat_history and chat_history[-1].get("is_ask_user"))
+        inferred_ask_count = 1 if is_followup else 0
+        restored_intent = chat_history[-1].get("pending_intent") if is_followup else None
+        # 追问时找到原始问题（ask_user 之前的那条 user 消息）
+        original_query = None
+        if is_followup:
+            for msg in reversed(chat_history[:-1]):  # 跳过 ask_user assistant 消息
+                if msg.get("role") == "user":
+                    original_query = msg.get("content")
+                    break
+        logger.info(f"追问状态推断: is_followup={is_followup}, intent={restored_intent}, original_query={original_query!r}")
 
-            # 4. 转换历史对话为 LangChain 格式
-            messages = []
-            if chat_history:
-                for msg in chat_history:
-                    role = msg.get("role")
-                    content = msg.get("content", "")
-                    if role == "user":
-                        messages.append(HumanMessage(content=content))
-                    elif role == "assistant":
-                        messages.append(AIMessage(content=content))
-                    # system 消息暂时忽略（可以在 Prompt 中处理）
+        # 构建初始状态（每次新请求都从 intent 节点重新开始）
+        initial_state: AgentState = {
+            "messages": messages,
+            "session_id": session_id,
+            "user_id": user_id,
+            "trace_id": trace_id,
+            "current_intent": restored_intent,
+            "intent_confidence": 0.0,
+            "original_query": original_query,
+            "slots": {},
+            "missing_slots": [],
+            "ask_user_count": inferred_ask_count,
+            "retrieved_documents": [],
+            "need_human_help": False,
+            "final_report": None,
+        }
 
-            # 5. 追加当前用户输入
-            messages.append(HumanMessage(content=user_query))
-
-            logger.info(f"传入历史消息数: {len(messages)}")
-
-            # 6. 构建初始状态
-            initial_state: AgentState = {
-                "messages": messages,  # ✅ 包含完整历史
-                "session_id": session_id,
-                "user_id": user_id,
-                "trace_id": trace_id,
-                "current_intent": None,
-                "intent_confidence": 0.0,
-                "slots": {},
-                "missing_slots": [],
-                "ask_user_count": 0,
-                "retrieval_strategy": None,
-                "retrieved_documents": [],
-                "steps": [],
-                "error_log": [],
-                "retry_count": 0,
-                "need_human_help": False,
-                "final_report": None,
-            }
-
-            # 7. 运行工作流
-            async for event in self.graph.astream_events(initial_state, config, version="v2"):
-                yield event
+        async for event in self.graph.astream_events(initial_state, config, version="v2"):
+            yield event

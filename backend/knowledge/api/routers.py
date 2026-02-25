@@ -12,7 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 from infrastructure.auth_dependencies import get_current_user
 
 from services.ingestion.ingestion_processor import IngestionProcessor
-from schemas.schema import UploadResponse, QueryRequest, QueryResponse
+from schemas.schema import UploadResponse, QueryRequest, QueryResponse, QuerySyncResponse, RetrieveRequest, RetrieveResponse, RetrieveChunk
 from services.retrieval_service import RetrievalService
 from business_logic.query_service import QueryService
 
@@ -299,6 +299,90 @@ async def upload_file_to_es(
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
             logger.info(f"🗑️ 临时文件已删除: {temp_file_path}")
+
+
+@router.post("/retrieve", response_model=RetrieveResponse, summary="纯检索接口（不经过 LLM 生成）")
+async def retrieve_chunks(
+    request: RetrieveRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    纯检索接口：只返回原始 chunks，不调用 LLM 生成答案。
+    供 app 层的 node_generate_report 统一生成最终回答，消除双重 LLM 问题。
+    """
+    if not request.question.strip():
+        raise HTTPException(status_code=400, detail="问题不能为空")
+
+    try:
+        es_service = get_es_retrieval_service()
+        results = await run_in_threadpool(
+            es_service.retrieve,
+            request.question,
+            top_k=request.top_k,
+            return_full_content=True
+        )
+
+        chunks = [
+            RetrieveChunk(
+                knowledge_no=r.get("knowledge_no"),
+                title=r.get("title"),
+                content=r.get("full_content") or r.get("content", ""),
+                score=r.get("score", 0.0)
+            )
+            for r in results
+        ]
+
+        return RetrieveResponse(question=request.question, chunks=chunks)
+
+    except Exception as e:
+        logger.error(f"检索失败: {e}")
+        raise HTTPException(status_code=500, detail=f"检索失败: {str(e)}")
+
+
+@router.post("/query_sync", response_model=QuerySyncResponse, summary="查询知识库（非流式，供 app 层调用）")
+async def query_knowledge_sync(
+    request: QueryRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """非流式查询知识库，返回 JSON 格式的完整 RAG 答案"""
+    if not request.question.strip():
+        raise HTTPException(status_code=400, detail="问题不能为空")
+
+    try:
+        query_service = get_query_service()
+        es_service = get_es_retrieval_service()
+
+        # 1. 查询重写
+        rewritten_query = await run_in_threadpool(query_service.rewrite_query, request.question)
+
+        # 2. 检索
+        results_original = await run_in_threadpool(es_service.retrieve, request.question, top_k=5, return_full_content=True)
+
+        results_rewritten = []
+        if rewritten_query and rewritten_query != request.question:
+            results_rewritten = await run_in_threadpool(es_service.retrieve, rewritten_query, top_k=5, return_full_content=True)
+
+        # 3. 去重合并
+        from langchain_core.documents import Document
+        final_docs = []
+        seen = set()
+        for res in results_original + results_rewritten:
+            kno = res.get("knowledge_no")
+            if kno not in seen:
+                seen.add(kno)
+                source_type = "original" if res in results_original else "rewritten"
+                final_docs.append(Document(
+                    page_content=res.get("full_content", res.get("content", "")),
+                    metadata={"source_type": source_type}
+                ))
+
+        # 4. 非流式生成答案
+        answer = await run_in_threadpool(query_service.generate_answer, request.question, final_docs)
+        return QuerySyncResponse(question=request.question, answer=answer)
+
+    except Exception as e:
+        logger.error(f"非流式查询失败: {e}")
+        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 
 @router.post("/query", summary="查询知识库（流式输出）")

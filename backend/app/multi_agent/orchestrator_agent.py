@@ -5,7 +5,12 @@ from agents import (
     Runner
 )
 # 使用 OpenAI Agents SDK 的模型
-from infrastructure.ai.openai_client import agents_sub_model, agents_main_model
+# [已废弃] Agents SDK 模型已移除，此文件仅保留作为历史参考
+try:
+    from infrastructure.ai.openai_client import agents_sub_model, agents_main_model
+except ImportError:
+    agents_sub_model = None
+    agents_main_model = None
 from infrastructure.ai.prompt_loader import load_prompt
 from multi_agent.agent_factory import AGENT_TOOLS
 from infrastructure.tools.mcp.mcp_servers import get_search_mcp_client, get_baidu_mcp_client

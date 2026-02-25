@@ -1,61 +1,31 @@
-import asyncio
 import httpx
-from typing import Dict
-from agents import function_tool
 from infrastructure.logging.logger import logger
 from config.settings import settings
 
 
-async def query_knowledge_raw(question: str) -> Dict:
+async def query_knowledge(question: str) -> str:
     """
-       查询电脑问题知识库服务,用于检索与用户问题相关的技术文档或解决方案。
-
-       Args:
-           question (Optional[str]): 需要查询的具体问题文本。
-
-       Returns:
-           dict: 包含查询结果的字典。包含 'question':用户输出问题 ‘answer’:答案
+    调用知识库平台 /query_sync 接口，获取完整的 RAG 答案。
+    知识库内部已完成：检索 → query rewrite → LLM 生成，返回最终答案。
     """
-
-    async with  httpx.AsyncClient(trust_env=False) as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         try:
-            # 构建请求头
             headers = {}
             if settings.KNOWLEDGE_BASE_TOKEN:
                 headers["Authorization"] = f"Bearer {settings.KNOWLEDGE_BASE_TOKEN}"
 
-            # 1. 发送请求（异步上下文管理器对象）
             response = await client.post(
-                url=f"{settings.KNOWLEDGE_BASE_URL}/query",
+                url=f"{settings.KNOWLEDGE_BASE_URL}/query_sync",
                 json={"question": question},
                 headers=headers,
-                timeout=60)
-
-            # 2. 处理异常情况(4xx-600x)直接抛出异常
+                timeout=120
+            )
             response.raise_for_status()
-
-            # 3. 处理正常情况
-            # 兼容流式响应 (SSE)
-            if "text/event-stream" in response.headers.get("Content-Type", ""):
-                answer_chunks = []
-                for line in response.text.splitlines():
-                    if line.startswith("data:"):
-                        # 去掉 'data:' 前缀
-                        content = line[5:]
-                        # 去掉协议规定的第一个空格
-                        if content.startswith(" "):
-                            content = content[1:]
-                        answer_chunks.append(content)
-                return {"question": question, "answer": "".join(answer_chunks)}
-            
-            # 普通 JSON 响应
-            return response.json()
+            return response.json().get("answer", "")
 
         except httpx.HTTPError as e:
-            logger.error(f"发送请求获取知识库服务下的知识库数据失败:{str(e)}")
-            return {"status": "error", "error_msg": f"发送请求获取知识库服务下的知识库数据失败:{e}"}
+            logger.error(f"知识库查询失败: {e}")
+            return ""
         except Exception as e:
-            logger.error(f"未知错误:{str(e)}")
-            return {"status": "error", "error_msg": f"未知错误:{e}"}
-
-query_knowledge = function_tool(query_knowledge_raw)
+            logger.error(f"知识库查询未知错误: {e}")
+            return ""

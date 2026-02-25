@@ -12,9 +12,11 @@
 from multi_agent.workflow.state import AgentState
 from infrastructure.logging.logger import logger
 from infrastructure.ai.openai_client import sub_model
+from infrastructure.utils.observability import node_timer
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 
+@node_timer("ask_user")
 async def node_ask_user(state: AgentState) -> AgentState:
     """
     追问节点
@@ -92,7 +94,6 @@ async def node_ask_user(state: AgentState) -> AgentState:
         logger.error(f"追问节点异常: {e}")
         state.setdefault("error_log", []).append(f"Ask user error: {str(e)}")
 
-        # 降级：使用通用追问
         generic_question = "请提供更多详细信息，以便我更好地帮助您。"
         return {
             **state,

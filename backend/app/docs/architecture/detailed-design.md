@@ -4,6 +4,7 @@
 | :--- | :--- | :--- | :--- |
 | v1.0 | 2026-01-28 | 架构师 | 初始化状态机与动态检索策略设计 |
 | v2.0 | 2026-01-28 | 架构师 | 升级为工业级架构，增加数据闭环、安全合规、人机协同等模块 |
+| v3.0 | 2026-02-23 | 架构师 | **同步 v2.0 混合架构：检索子图自主循环替代 StrategyGen 硬编码分发** |
 
 ---
 
@@ -32,96 +33,102 @@
 
 ```mermaid
 graph TD
-    User[用户终端] --> WAF[WAF/API Gateway]
-    WAF --> Auth[认证鉴权 & 限流]
-    Auth --> Guard_In[输入安全围栏]
+    User[用户终端] --> API[FastAPI /api/query]
 
-    subgraph Core["Core Orchestration Engine (Python)"]
-        Guard_In --> Router{意图路由 Agent}
+    subgraph Core["Core Orchestration Engine (LangGraph v2.0)"]
+        API --> Intent[Intent 意图识别]
 
-        Router -->|简单问答| Chat[通用 Chat Agent]
-        Router -->|故障诊断/复杂任务| FSM[有限状态机]
+        Intent -->|闲聊| Chat[General Chat]
+        Intent -->|业务| SlotFilling[Slot Filling]
 
-        subgraph FSMContext["FSM Context (Shared Memory)"]
-            State1[SlotFilling] --> State2[StrategyGen]
-            State2 --> State3[ActionExec]
-            State3 --> State4[ResponseGen]
+        SlotFilling -->|缺槽位| AskUser[Ask User]
+        SlotFilling -->|齐全| Retrieval[Retrieval 桥接节点]
+
+        subgraph SubGraph["检索子图 (自主循环 max 3)"]
+            Dispatch[Dispatch 源选择] --> Search[Search 检索]
+            Search --> Evaluate[Evaluate 质量判断]
+            Evaluate -->|不够好| Rewrite[Rewrite 改写/换源]
+            Rewrite --> Search
         end
 
-        FSM --> State1
-        State4 --> HITL[Human In The Loop]
+        Retrieval --> SubGraph
+        SubGraph --> Verify[Verify 质量校验]
+
+        Verify -->|通过| Report[Generate Report]
+        Verify -->|失败| Escalate[Escalate 转人工]
     end
 
     subgraph Knowledge["Knowledge & Service Layer"]
-        SearchAPI[增强检索服务]
-        ES[Elasticsearch]
-        Rerank[RRF 重排模型]
-        Tools[外部工具]
-
-        SearchAPI --> ES
-        SearchAPI --> Rerank
+        KB[知识库 ChromaDB]
+        Web[Web Search MCP]
+        Tools[Local Tools MySQL/地图]
     end
 
-    State3 -->|Active RAG| SearchAPI
-    State3 -->|Tool Call| Tools
+    Search -->|KB| KB
+    Search -->|Web| Web
+    Search -->|Local| Tools
 
-    subgraph DataLoop["Data Closed Loop System"]
-        Log[全链路日志] --> ETL[数据清洗]
-        Feedback[用户反馈] --> Label[自动/人工标注]
-        Label --> Eval[效果评估]
-        Eval -->|Bad Cases| KB_Update[知识库修正]
-        Eval -->|Bad Cases| Prompt_Opt[Prompt 优化]
-    end
-
-    State4 --> Response[响应生成]
-    Response --> Guard_Out[输出安全围栏]
-    Guard_Out --> User
+    Chat --> SSE[SSE 流式输出]
+    Report --> SSE
+    AskUser --> SSE
+    Escalate --> SSE
+    SSE --> User
 ```
 
 ---
 
 ## 3. 核心模块详细设计 (Module Design)
 
-### 3.1 确定性编排引擎 (FSM Orchestrator)
+### 3.1 确定性编排引擎 (LangGraph Pipeline Orchestrator)
 
-放弃纯 Prompt 驱动的 ReAct 模式，采用 **FSM (有限状态机)** 管理核心业务流，确保流程的**确定性**。
+采用 **LangGraph 显式管道** 管理核心业务流，确保流程的**确定性**，同时在检索环节嵌入自主循环子图提供**智能性**。
 
-#### 3.1.1 状态定义
-*   **INIT**: 初始化上下文，加载用户画像 (User Profile) 和历史 Session。
-*   **INTENT_CHECK**: 意图识别与分类（故障诊断 vs 技术咨询 vs 闲聊）。
-*   **SLOT_FILLING**: **(核心)** 强制信息收集。基于 Pydantic 校验器，检查关键槽位（如 `device_id`, `error_code`）是否完备。若缺失，强制进入 `ASK_USER` 状态。
-*   **STRATEGY_GEN**: 生成检索或工具调用策略（Json 格式）。
-*   **RETRIEVAL / TOOL_EXEC**: 执行具体的检索或工具调用。
-*   **VERIFY**: 结果校验。检查检索结果是否为空，置信度是否达标。
-*   **HITL (Human-in-the-Loop)**: **(新增)** 若多次检索失败或置信度低于阈值，自动升级为人工客服工单，并生成摘要给人工坐席。
-*   **RESPONSE_GEN**: 生成最终回复。
+#### 3.1.1 主图节点定义
+*   **INTENT**: 意图识别与分类（L1→L2 二级分类：tech_issue, search_info, service_station, poi_navigation, chitchat）。
+*   **SLOT_FILLING**: 强制信息收集。根据意图提取所需槽位（如 `problem_description`, `device_model`）。若缺失，路由到 `ASK_USER`。
+*   **ASK_USER**: 生成追问话术，最多 3 轮后自动升级人工。
+*   **RETRIEVAL**: 桥接节点，运行检索子图（dispatch→search→evaluate→rewrite 循环，max 3 次）。
+*   **VERIFY**: LLM 质量判断，检索结果是否匹配用户问题。不合格时清空文档触发 escalate。
+*   **GENERATE_REPORT**: 综合检索结果生成最终答案。
+*   **ESCALATE**: 转人工客服，设置 `need_human_help=True`。
 
-#### 3.1.2 异常熔断机制
-*   **死循环检测**：FSM 内部维护 Step Counter，超过 10 步强制结束并转人工。
-*   **LLM 超时重试**：关键节点配置 Exponential Backoff 重试策略。
+#### 3.1.2 检索子图自主循环
+检索子图内部实现 **evaluate→rewrite** 循环，替代原有的 `STRATEGY_GEN` 硬编码分发：
+*   **dispatch**: 根据意图映射首选数据源（tech_issue→kb, search_info→web, service_station/poi_navigation→local_tools）
+*   **search**: 执行实际检索（KB/Web/LocalTools）
+*   **evaluate**: LLM 判断结果质量，返回 suggestion（pass/retry_same/switch_source）
+*   **rewrite**: 改写 query 或切换数据源（kb↔web）
+*   **确定性兜底**: 最多循环 3 次，超限强制退出
+
+#### 3.1.3 异常熔断机制
+*   **追问上限**: `ask_user_count` 最多 3 次，超限转人工。
+*   **检索上限**: 子图 `max_retries=3`，超限强制退出带降级标记。
+*   **会话持久化**: 支持 Redis checkpointer（生产）或 MemorySaver（开发）。
 
 ### 3.2 主动检索协议 (Active Retrieval Protocol)
 
-Agent 不再是被动的“查询者”，而是拥有“元认知”的**策略制定者**。它负责告诉知识库服务“我要找什么类型的资料”，而不是“怎么找”。
+检索环节已从硬编码的 `STRATEGY_GEN` 分发升级为**检索子图自主循环**。子图内部的 `evaluate` 节点由 LLM 判断结果质量，`rewrite` 节点负责改写 query 或切换数据源。
 
-#### 3.2.1 动态策略矩阵
-在 `STRATEGY_GEN` 阶段，Agent 根据意图类型输出业务层检索配置：
+#### 3.2.1 数据源映射策略
 
-| 场景类型 | 意图标签 (Query Tags) | 业务目标 | 适用案例 |
+在子图 `dispatch` 节点中，根据 L2 意图自动选择首选数据源：
+
+| L2 意图 | 首选数据源 | 兜底策略 | 适用案例 |
 | :--- | :--- | :--- | :--- |
-| **精确报错** | `["ErrorCode", "ExactMatch"]` | 精确命中特定错误码解决方案 | "错误码 0x8004005" |
-| **模糊咨询** | `["SemanticSearch", "Broad"]` | 召回语义相关的故障现象 | "电脑运行很慢，卡顿" |
-| **组合查询** | `["Hybrid", "HowTo"]` | 综合检索操作指南 | "Win10 如何配置静态IP" |
-| **已知实体** | `["EntityFilter", "Product"]` | 限定在特定产品线下检索 | "ThinkPad X1 无法充电" |
+| **tech_issue** | KB (知识库) | evaluate 不通过 → 切换 Web | “电脑蓝屏怎么办” |
+| **search_info** | Web (联网搜索) | — (Web 为最终数据源) | “今天北京天气” |
+| **service_station** | Local Tools (MySQL) | — | “最近的联想售后” |
+| **poi_navigation** | Local Tools (MCP 地图) | — | “导航去天安门” |
 
-#### 3.2.2 接口 Schema (Business Layer)
-```python
-class RetrievalStrategy(BaseModel):
-    intent_type: str = Field(..., description="业务意图类型，如 tech_issue")
-    query_tags: List[str] = Field(default=[], description="业务检索标签，指导知识库内部策略")
-    filters: Dict[str, Any] = {} # e.g. {"product_line": "server"}
-    top_k: int = 5
+#### 3.2.2 自主循环机制
 ```
+dispatch → search → evaluate → (sufficient?) → exit
+                       ↓ (not sufficient)
+                    rewrite → search → evaluate → ...  (max 3 loops)
+```
+*   **evaluate** 返回: `is_sufficient` (bool) + `suggestion` (pass/retry_same/switch_source)
+*   **rewrite** 执行: switch_source 时切换 kb↔web，否则 LLM 改写 query
+*   **确定性兜底**: `loop_count >= max_retries(3)` 时强制退出
 
 ### 3.3 数据闭环系统 (Data Closed Loop)
 
@@ -163,8 +170,8 @@ class RetrievalStrategy(BaseModel):
   "component": "Orchestrator",
   "event": "state_transition",
   "attributes": {
-    "from": "SLOT_FILLING",
-    "to": "STRATEGY_GEN",
+    "from": "slot_filling",
+    "to": "retrieval",
     "slots_collected": {"device": "Server A", "error": "Disk Full"},
     "latency_ms": 450
   }

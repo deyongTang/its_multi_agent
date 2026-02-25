@@ -2,7 +2,7 @@ import asyncio
 import json
 from multi_agent.workflow.state import AgentState
 from infrastructure.logging.logger import logger 
-from infrastructure.tools.local.knowledge_base import query_knowledge_raw
+from infrastructure.tools.local.knowledge_base import query_knowledge
 from infrastructure.tools.mcp.mcp_servers import get_search_mcp_client, get_baidu_mcp_client
 from infrastructure.tools.local.service_station import resolve_user_location_from_text_raw, query_nearest_repair_shops_by_coords_raw
 
@@ -15,31 +15,23 @@ def get_last_user_query(state: AgentState) -> str:
 
 async def node_query_knowledge(state: AgentState) -> dict:
     """
-    并行节点：调用知识库平台 HTTP API
+    知识库节点：调用知识库 /query_sync 接口，获取完整 RAG 答案。
+    知识库内部已完成检索+LLM生成，这里直接拿最终答案。
     """
     user_query = get_last_user_query(state)
     logger.info(f"[Knowledge Service] Querying: {user_query}")
 
     try:
-        result = await query_knowledge_raw(question=user_query)
-        
-        if result.get("status") == "error":
-            logger.warning(f"[Knowledge Service] API Error: {result.get('error_msg')}")
+        answer = await query_knowledge(question=user_query)
+
+        if not answer:
+            logger.info("[Knowledge Service] 知识库未返回答案")
             return {"retrieved_documents": []}
-            
-        answer = result.get("answer", "").strip()
-        
-        # --- 核心修复：有效性校验 ---
-        # 如果知识库明确表示没找到，视为无结果，强制返回空列表以触发兜底
-        invalid_patterns = ["未找到", "没有找到", "抱歉", "无法回答", "No result", "I don't know"]
-        is_invalid = not answer or any(p in answer for p in invalid_patterns)
-        
-        if is_invalid:
-            logger.info(f"[Knowledge Service] 结果被判定为无效/拒答，准备触发兜底。Answer: {answer[:20]}...")
-            return {"retrieved_documents": []}
-            
-        return {"retrieved_documents": [{"source": "KnowledgeBase", "content": answer, "metadata": result}]}
-        
+
+        docs = [{"source": "KnowledgeBase", "content": answer}]
+        logger.info(f"[Knowledge Service] 获取到 RAG 答案，长度: {len(answer)}")
+        return {"retrieved_documents": docs}
+
     except Exception as e:
         logger.error(f"[Knowledge Service] Exception: {e}")
         return {"retrieved_documents": []}

@@ -1,6 +1,7 @@
 from multi_agent.workflow.state import AgentState
 from infrastructure.logging.logger import logger
 from infrastructure.ai.openai_client import main_model
+from infrastructure.utils.observability import node_timer
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 
 def node_expand_query(state: AgentState) -> dict:
@@ -21,6 +22,7 @@ def node_expand_query(state: AgentState) -> dict:
         "error_log": state.get("error_log", []) + [f"Retry {new_retry}: Switched to fallback."]
     }
 
+@node_timer("escalate")
 def node_escalate(state: AgentState) -> dict:
     """
     Escalation Node
@@ -34,72 +36,89 @@ def node_escalate(state: AgentState) -> dict:
         "messages": [AIMessage(content="很抱歉，我尝试了多次仍无法找到准确信息。已为您转接人工客服，请稍候...")]
     }
 
+@node_timer("generate_report")
 async def node_generate_report(state: AgentState) -> dict:
     """
     Response Generation Node
-    
-    Synthesizes the final answer from retrieved documents using the reasoning model.
+
+    - 知识库场景：直接使用 RAG 答案（知识库已完成检索+生成）
+    - 其他场景（web/local_tools/混合）：用 LLM 合成多源结果
     """
     docs = state.get("retrieved_documents", [])
     intent = state.get("current_intent", "general")
-    
+
     logger.info(f"Generating report from {len(docs)} documents for intent: {intent}")
-    
+
     if not docs:
         return {
             "messages": [AIMessage(content="抱歉，我没有找到相关的结果。您可以尝试换一种说法，或者联系人工客服。")]
         }
 
-    # 1. 准备背景资料
+    # 判断是否全部来自知识库（已经是完整 RAG 答案）
+    kb_docs = [d for d in docs if d.get("source") == "KnowledgeBase"]
+    if kb_docs and len(kb_docs) == len(docs):
+        answer = kb_docs[0].get("content", "")
+        logger.info("[Report] 知识库场景，直接使用 RAG 答案")
+        return {
+            "final_report": {"summary": answer, "doc_count": len(docs)},
+            "messages": [AIMessage(content=answer)]
+        }
+
+    # 多源场景：用 LLM 合成
+    return await _synthesize_multi_source(state, docs, intent)
+
+
+async def _synthesize_multi_source(state: AgentState, docs: list, intent: str) -> dict:
+    """多源结果 LLM 合成（web/local_tools/混合场景）"""
     context_parts = []
     for i, doc in enumerate(docs):
         source = doc.get("source", "Unknown")
         content = doc.get("content", "")
         context_parts.append(f"--- 来源 {i+1} [{source}] ---\n{content}")
-    
+
     context = "\n\n".join(context_parts)
-    
-    # 2. 构建合成 Prompt
-    report_prompt = SystemMessage(content=f"""你是一个专业的 ITS 智能客服。请根据提供的多源参考资料，为用户生成一个准确、完整、专业的回答。
+
+    report_prompt = SystemMessage(content=f"""你是专业的 ITS 智能客服。根据参考资料回答用户问题。
 
 意图类型: {intent}
 
 参考资料：
 {context}
 
-写作指南：
-1. 优先度：如果资料冲突，以知识库(KnowledgeBase)或本地数据库(LocalDB)为准。
-2. 结构化：使用分步说明、列表或表格（如果适用）。
-3. 准确性：不要编造事实。如果资料中没有答案，请诚实说明。
-4. 品牌一致性：作为联想智能客服，保持专业、礼貌、高效。
-5. 去冗余：合并多个来源中的重复信息。
+要求：
+- 只回答用户明确提问的内容，不要扩展到无关话题
+- 从参考资料中提取与用户问题直接相关的信息，忽略无关内容
+- 不编造事实；使用 Markdown 格式。""")
 
-直接返回回复文本，不要返回 JSON 格式。可以使用 Markdown 格式。
-""")
-
-    # 获取最后一条用户消息作为上下文
-    user_query = ""
+    # 追问场景：合并原始问题 + 补充信息，让 LLM 有完整上下文
+    original_query = state.get("original_query") or ""
+    last_user_query = ""
     for msg in reversed(state.get("messages", [])):
         if msg.type == "human":
-            user_query = msg.content
+            last_user_query = msg.content
             break
+    if original_query and original_query != last_user_query:
+        user_query = f"{original_query}（补充信息：{last_user_query}）"
+    else:
+        user_query = last_user_query or original_query
 
     try:
-        response = await main_model.ainvoke([
+        chunks = []
+        async for chunk in main_model.astream([
             report_prompt,
             HumanMessage(content=f"用户的问题是：{user_query}")
-        ])
-        
-        answer = response.content.strip()
-        
+        ]):
+            if chunk.content:
+                chunks.append(chunk.content)
+
+        answer = "".join(chunks).strip()
         return {
             "final_report": {"summary": answer, "doc_count": len(docs)},
             "messages": [AIMessage(content=answer)]
         }
     except Exception as e:
         logger.error(f"Report generation failed: {e}")
-        # 降级：简单拼接
-        fallback_answer = "根据找到的信息：\n\n" + "\n\n".join([d.get("content", "")[:200] for d in docs[:2]])
-        return {
-            "messages": [AIMessage(content=fallback_answer)]
-        }
+        fallback = "根据找到的信息：\n\n" + "\n\n".join(
+            [d.get("content", "")[:200] for d in docs[:2]]
+        )
+        return {"messages": [AIMessage(content=fallback)]}

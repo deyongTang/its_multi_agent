@@ -7,7 +7,8 @@
 | [detailed-design.md](architecture/detailed-design.md) | 工业级 ITS 智能运维编排引擎详细设计（分层架构、FSM 引擎、安全合规、可观测性） |
 | [workflow-engine.md](architecture/workflow-engine.md) | LangGraph 工作流引擎技术方案（v1.5），含节点/边定义、状态流转拓扑图 |
 | [intent-design.md](architecture/intent-design.md) | 多智能体角色定义与二级意图体系设计（L1/L2 意图映射、路由逻辑） |
-| [upgrade-plan.md](architecture/upgrade-plan.md) | 从 Demo 级原型向工业级分层系统的演进规划（Phase 1-3 路线图） |
+| [upgrade-plan.md](architecture/upgrade-plan.md) | ⚠️ [已废弃] Supervisor-Worker 重构方案（保留作为历史参考） |
+| [upgrade-plan-v2.md](architecture/upgrade-plan-v2.md) | ✅ 混合架构升级计划：外层显式管道 + 内层自主循环子图（检索子图、验证子图） |
 | [agent-design-pattern.md](architecture/agent-design-pattern.md) | Agent 设计模式：自适应策略 vs 显式编排的选型决策 + Agent-as-Tool 适配器模式 |
 
 ## 使用指南 (`guides/`)
@@ -35,6 +36,7 @@
 | :--- | :--- |
 | [langgraph-phase1.md](reports/langgraph-phase1.md) | LangGraph 重构 Phase 1 完成总结（核心功能、技术亮点、验收标准） |
 | [industrial-upgrade.md](reports/industrial-upgrade.md) | 从 Demo 到工业级核心竞争力升级报告（FSM 编排、韧性架构、全链路可观测性） |
+| [architecture-review.md](reports/architecture-review.md) | 架构审查报告（数据流全貌、双模型架构、6 项架构问题、升级优先级） |
 
 ---
 

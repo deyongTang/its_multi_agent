@@ -9,20 +9,31 @@
 from multi_agent.workflow.state import AgentState
 from infrastructure.logging.logger import logger
 from infrastructure.ai.openai_client import sub_model
+from infrastructure.utils.resilience import safe_parse_json
+from infrastructure.utils.observability import node_timer
 from langchain_core.messages import HumanMessage, SystemMessage
-import json
 
+
+@node_timer("intent")
 async def node_intent(state: AgentState) -> AgentState:
     try:
         messages = state.get("messages", [])
         if not messages:
             return {**state, "current_intent": "chitchat", "intent_confidence": 0.0}
 
+        # 追问回复：current_intent 已从 session 恢复，直接复用，无需调用 LLM
+        if state.get("ask_user_count", 0) > 0 and state.get("current_intent"):
+            logger.info(f"追问回复，复用意图: {state['current_intent']}")
+            return {**state}
+
         last_message = messages[-1]
         user_query = last_message.content if hasattr(last_message, 'content') else str(last_message)
 
         intent_prompt = SystemMessage(content="""你是一个 ITS 多智能体系统的首席调度专家。
-请根据用户输入，精准判定 L1（一级）和 L2（二级）意图。
+请根据用户输入和对话历史，精准判定 L1（一级）和 L2（二级）意图。
+
+【重要】如果历史对话中 AI 刚刚追问了某个信息（如地点、设备型号等），用户当前的回复是对该追问的补充，
+则意图应与历史对话保持一致，不要重新识别为新意图。
 
 ### 意图体系：
 
@@ -44,12 +55,16 @@ async def node_intent(state: AgentState) -> AgentState:
     "confidence": 0.0-1.0,
     "reason": "判断依据"
 }""")
+        # 传入最近几轮对话历史，让 LLM 能识别追问场景
+        history = messages[-6:-1]  # 最近 3 轮（不含当前消息）
         response = await sub_model.ainvoke([
-            intent_prompt, 
+            intent_prompt,
+            *history,
             HumanMessage(content=user_query)
         ])
 
-        result = json.loads(response.content.replace("```json", "").replace("```", "").strip())
+        text = response.content if isinstance(response.content, str) else str(response.content)
+        result = safe_parse_json(text, {"l2_intent": "chitchat", "confidence": 0.0})
         
         # 将 L2 意图存入 current_intent 供业务节点使用
         intent = result.get("l2_intent", "chitchat")
