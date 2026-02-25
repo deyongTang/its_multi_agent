@@ -132,9 +132,11 @@ async def node_slot_filling(state: AgentState) -> AgentState:
         new_slots = result.get("extracted_slots", {})
         merged_slots = {**old_slots, **new_slots}
         
-        missing = result.get("missing_slots", [])
-        
-        logger.info(f"槽位提取结果: {merged_slots}, 缺失: {missing}")
+        raw_missing = result.get("missing_slots", [])
+        # 过滤：只保留当前意图真正需要的槽位，防止 LLM 返回其他意图的槽位
+        missing = [s for s in raw_missing if s in required_slots]
+
+        logger.info(f"槽位提取结果: {merged_slots}, LLM缺失: {raw_missing}, 过滤后缺失: {missing}")
 
         ask_count = 0 if not missing else state.get("ask_user_count", 0)
         return {

@@ -90,32 +90,32 @@ graph TD
     classDef action fill:#f9f,stroke:#333,stroke-width:2px;
     classDef check fill:#ffd,stroke:#333,stroke-width:2px;
     classDef endNode fill:#eee,stroke:#333,stroke-width:1px;
-    classDef subgraph_node fill:#ccf,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5;
 
     __start__((Start)) --> node_intent[Intent 意图识别]:::check
 
-    node_intent -- Chitchat --> node_general_chat[General Chat]:::endNode
-    node_intent -- Business --> node_slot_filling[Slot Filling]:::action
+    node_intent -- Chitchat --> node_general_chat[General Chat 闲聊]:::endNode
+    node_intent -- Business --> node_slot_filling[Slot Filling 槽位提取]:::action
 
     node_slot_filling --> check_slots{Slots OK?}:::check
-    check_slots -- No --> node_ask_user[Ask User]:::action
-    node_ask_user --> __end__((End)):::endNode
+    check_slots -- "缺失槽位" --> node_ask_user[Ask User 追问]:::action
+    node_ask_user -- "count < 3，等待用户回复" --> __end__((End)):::endNode
+    node_ask_user -- "count ≥ 3，放弃追问" --> node_escalate
 
-    check_slots -- Yes --> node_retrieval
+    check_slots -- "槽位齐全" --> node_retrieval[Retrieval 桥接节点]:::action
 
     subgraph RetrievalSubGraph["检索子图 (max 3 loops)"]
-        dispatch[Dispatch 源选择] --> search[Search 检索]
-        search --> evaluate{Evaluate 质量判断}
-        evaluate -- 不够好 --> rewrite[Rewrite 改写/换源]
-        rewrite --> search
-        evaluate -- 足够 / 超限 --> exit_sub((Exit))
+        dispatch[Dispatch 源选择\nintent → kb/web/local_tools] --> search[Search 执行检索]
+        search --> evaluate{Evaluate\n质量判断}
+        evaluate -- "is_sufficient=false\n且 loop_count < 3" --> rewrite[Rewrite\n改写query/换源]
+        rewrite -- "循环回搜索" --> search
+        evaluate -- "is_sufficient=true\n或 loop_count ≥ 3" --> exit_sub((Exit))
     end
 
-    node_retrieval[Retrieval 桥接节点]:::action --> RetrievalSubGraph
+    node_retrieval --> RetrievalSubGraph
     RetrievalSubGraph --> node_verify{Verify 质量校验}:::check
 
-    node_verify -- 有文档 --> node_generate_report[Generate Report]:::action
-    node_verify -- 无文档 --> node_escalate[Escalate 转人工]:::action
+    node_verify -- "retrieved_documents ≠ []" --> node_generate_report[Generate Report 生成答案]:::action
+    node_verify -- "retrieved_documents = []" --> node_escalate[Escalate 转人工]:::action
 
     node_general_chat --> __end__
     node_generate_report --> __end__

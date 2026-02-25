@@ -2,7 +2,7 @@ from infrastructure.database.database_pool import pool
 import json
 import stun
 from pymysql.cursors import DictCursor
-from infrastructure.tools.mcp.mcp_servers import baidu_mcp_client
+from infrastructure.tools.mcp.mcp_servers import create_baidu_mcp_client
 from infrastructure.logging.logger import logger
 import math
 
@@ -80,7 +80,8 @@ async def resolve_user_location_from_text_raw(
 
     if user_input:
         try:
-            geo_result = await baidu_mcp_client.call_tool(tool_name="map_geocode", arguments={"address": user_input})
+            async with create_baidu_mcp_client() as baidu_client:
+                geo_result = await baidu_client.call_tool(tool_name="map_geocode", arguments={"address": user_input})
             text = geo_result.content[0].text
             text = json.loads(text)
             result = text['result']
@@ -102,7 +103,8 @@ async def resolve_user_location_from_text_raw(
 
     if user_ip and user_ip not in ("127.0.0.1", "localhost", "::1"):
         try:
-            ip_result = await baidu_mcp_client.call_tool("map_ip_location", {"ip": user_ip})
+            async with create_baidu_mcp_client() as baidu_client:
+                ip_result = await baidu_client.call_tool("map_ip_location", {"ip": user_ip})
             text = ip_result.content[0].text
             data = json.loads(text)
 

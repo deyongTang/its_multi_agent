@@ -20,7 +20,7 @@ from multi_agent.workflow.nodes.action_nodes import node_escalate, node_generate
 from multi_agent.workflow.retrieval_subgraph import build_retrieval_subgraph
 
 # Edges
-from multi_agent.workflow.edges import route_intent, route_slot_check
+from multi_agent.workflow.edges import route_intent, route_slot_check, route_ask_user_result
 from multi_agent.workflow.edges.routers_phase2 import route_verify_result
 
 from infrastructure.logging.logger import logger
@@ -116,7 +116,10 @@ def create_workflow_graph():
 
     # End Nodes
     workflow.add_edge("general_chat", END)
-    workflow.add_edge("ask_user", END)
+    workflow.add_conditional_edges("ask_user", route_ask_user_result, {
+        "escalate": "escalate",
+        "end": END,
+    })
     workflow.add_edge("generate_report", END)
     workflow.add_edge("escalate", END)
 
