@@ -1,9 +1,14 @@
 from agents import Agent, ModelSettings
 from infrastructure.ai.openai_client import sub_model
-from infrastructure.tools.local.service_station import (
-    resolve_user_location_from_text,
-    query_nearest_repair_shops_by_coords
-)
+# [已废弃] function_tool 包装已移除，此文件仅保留作为历史参考
+try:
+    from infrastructure.tools.local.service_station import (
+        resolve_user_location_from_text,
+        query_nearest_repair_shops_by_coords
+    )
+except ImportError:
+    resolve_user_location_from_text = None
+    query_nearest_repair_shops_by_coords = None
 
 from infrastructure.tools.mcp.mcp_servers import (
     get_baidu_mcp_client,

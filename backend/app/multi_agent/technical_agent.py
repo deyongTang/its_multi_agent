@@ -1,6 +1,10 @@
 from infrastructure.ai.prompt_loader import load_prompt
 from infrastructure.ai.openai_client import sub_model
-from infrastructure.tools.local.knowledge_base import query_knowledge
+# [已废弃] query_knowledge 已被 retrieve_knowledge_chunks 替代
+try:
+    from infrastructure.tools.local.knowledge_base import query_knowledge
+except ImportError:
+    query_knowledge = None
 from infrastructure.tools.mcp.mcp_servers import get_search_mcp_client
 from agents import Agent, ModelSettings
 from agents import Runner,RunConfig

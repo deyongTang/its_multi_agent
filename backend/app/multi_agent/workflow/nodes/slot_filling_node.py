@@ -3,30 +3,81 @@
 
 职责：
 1. 根据 L2 意图，提取并验证业务必需的槽位 (Slots)。
-2. 【关键】识别非槽位依赖意图（如 search_info），直接放行。
+2. search_info 意图走 LLM 动态槽位判断（搜索类查询所需信息不固定）。
 """
 
+import json
 from multi_agent.workflow.state import AgentState
 from infrastructure.logging.logger import logger
 from infrastructure.ai.openai_client import sub_model
+from infrastructure.utils.resilience import safe_parse_json
+from infrastructure.utils.observability import node_timer
 from langchain_core.messages import HumanMessage, SystemMessage
-import json
 
 # 定义 L2 意图的必需槽位
 REQUIRED_SLOTS = {
     "tech_issue": ["problem_description", "device_model"], # 故障诊断必须知道什么东西坏了
     "service_station": ["location"],                       # 维修点必须知道用户在哪
     "poi_navigation": ["destination"],                     # 导航必须知道去哪
-    # 以下意图不需要槽位填充，直接跳过
-    "search_info": [], 
+    # search_info 槽位由 LLM 动态判断，不在此硬编码
+    "search_info": None,
     "chitchat": []
 }
 
+
+async def _dynamic_slot_filling(state: AgentState, intent: str) -> AgentState:
+    """search_info 等动态意图：让 LLM 判断用户查询是否缺少关键信息"""
+    messages = state.get("messages", [])
+    conversation = "\n".join([f"{msg.type}: {msg.content}" for msg in messages[-3:]])
+
+    try:
+        prompt = SystemMessage(content="""你是搜索意图分析专家。判断用户查询是否缺少执行搜索所需的关键信息。
+
+规则：
+- 天气/气温/降雨等气象查询：必须有【具体地点】，否则缺失
+- 股价/行情查询：必须有【股票名称或代码】，否则缺失
+- 新闻/资讯/科技动态：无需额外信息，直接搜索
+- 其他查询：判断是否有足够信息执行搜索
+- 【重要】如果当前问题缺少信息，但对话历史中已有该信息，则从历史中提取，不算缺失
+
+示例：
+- "今天北京天气" → {"extracted_slots": {"地点": "北京"}, "missing_slots": [], "is_sufficient": true}
+- "明天天气怎么样" → {"extracted_slots": {}, "missing_slots": ["地点"], "is_sufficient": false}
+- 历史有"深圳"，当前问"后天呢" → {"extracted_slots": {"地点": "深圳"}, "missing_slots": [], "is_sufficient": true}
+
+只返回 JSON，不要解释：{"extracted_slots": {...}, "missing_slots": [...], "is_sufficient": true/false}""")
+
+        response = await sub_model.ainvoke([
+            prompt,
+            HumanMessage(content=f"最近对话：\n{conversation}")
+        ])
+
+        text = response.content if isinstance(response.content, str) else str(response.content)
+        result = safe_parse_json(text, {"extracted_slots": {}, "missing_slots": [], "is_sufficient": True})
+
+        slots = {**state.get("slots", {}), **result.get("extracted_slots", {})}
+        missing = result.get("missing_slots", []) if not result.get("is_sufficient") else []
+
+        logger.info(f"[search_info] 动态槽位判断: slots={slots}, missing={missing}")
+        # 槽位满足时重置追问计数，避免下一轮新问题被误判为追问回复
+        ask_count = 0 if not missing else state.get("ask_user_count", 0)
+        return {**state, "slots": slots, "missing_slots": missing, "ask_user_count": ask_count}
+
+    except Exception as e:
+        logger.error(f"动态槽位判断异常: {e}")
+        # 异常时放行，不阻塞流程
+        return {**state, "slots": state.get("slots", {}), "missing_slots": []}
+
+
+@node_timer("slot_filling")
 async def node_slot_filling(state: AgentState) -> AgentState:
-    current_intent = state.get("current_intent", "chitchat")
+    current_intent = state.get("current_intent") or "chitchat"
     
-    # 1. 快速放行逻辑：如果意图不在必需槽位清单中，或者清单为空，直接返回
+    # 1. 快速放行 / 动态槽位判断
     required_slots = REQUIRED_SLOTS.get(current_intent, [])
+    if required_slots is None:
+        # search_info 等动态意图：让 LLM 判断是否需要补充信息
+        return await _dynamic_slot_filling(state, current_intent)
     if not required_slots:
         logger.info(f"意图 [{current_intent}] 无需槽位填充，直接放行")
         return {**state, "slots": state.get("slots", {}), "missing_slots": []}
@@ -73,7 +124,8 @@ async def node_slot_filling(state: AgentState) -> AgentState:
             HumanMessage(content=f"最近对话：\n{conversation}")
         ])
 
-        result = json.loads(response.content.replace("```json", "").replace("```", "").strip())
+        text = response.content if isinstance(response.content, str) else str(response.content)
+        result = safe_parse_json(text, {"extracted_slots": {}, "missing_slots": required_slots})
         
         # 3. 合并新老槽位
         old_slots = state.get("slots", {})
@@ -84,10 +136,12 @@ async def node_slot_filling(state: AgentState) -> AgentState:
         
         logger.info(f"槽位提取结果: {merged_slots}, 缺失: {missing}")
 
+        ask_count = 0 if not missing else state.get("ask_user_count", 0)
         return {
             **state,
             "slots": merged_slots,
-            "missing_slots": missing
+            "missing_slots": missing,
+            "ask_user_count": ask_count,
         }
 
     except Exception as e:

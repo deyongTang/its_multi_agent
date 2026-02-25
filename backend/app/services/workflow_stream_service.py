@@ -20,7 +20,21 @@ async def process_workflow_stream(workflow_stream: AsyncGenerator) -> AsyncGener
         # 1. 处理节点开始/结束事件 (PROCESS 类型)
         if kind == "on_chain_start" and name == "LangGraph":
              pass # 流程开始
-             
+
+        # 追问节点结束时，从 output state 取出追问内容发给前端
+        elif kind == "on_chain_end" and name == "ask_user":
+            output = data.get("output", {})
+            messages = output.get("messages", [])
+            pending_intent = output.get("current_intent", "")
+            for msg in messages:
+                content = msg.content if hasattr(msg, "content") else str(msg)
+                if content:
+                    import json as _json
+                    packet = ResponseFactory.build_text(content, ContentKind.ANSWER).model_dump()
+                    packet["is_ask_user"] = True
+                    packet["pending_intent"] = pending_intent
+                    yield "data: " + _json.dumps(packet, ensure_ascii=False) + "\n\n"
+
         elif kind == "on_node_start":
             node_name = name
             # 过滤掉内部节点名称，只展示有意义的节点

@@ -66,3 +66,29 @@ class QueryResponse(BaseModel):
     answer: str  # 生成的答案
 
 
+class QuerySyncResponse(BaseModel):
+    """非流式查询响应（供 app 层调用）"""
+    question: str
+    answer: str
+
+
+class RetrieveRequest(BaseModel):
+    """纯检索请求（不经过 LLM 生成）"""
+    question: str
+    top_k: int = 5
+
+
+class RetrieveChunk(BaseModel):
+    """单个检索结果 chunk"""
+    knowledge_no: Optional[str] = None
+    title: Optional[str] = None
+    content: str
+    score: float = 0.0
+
+
+class RetrieveResponse(BaseModel):
+    """纯检索响应"""
+    question: str
+    chunks: list[RetrieveChunk]
+
+

@@ -56,39 +56,36 @@ class MultiAgentServiceV2:
 
             # 3. 处理流式响应并累积最终结果
             full_ai_response = ""
-            
+            is_ask_user_response = False
+            pending_intent = ""
+
             async for chunk in process_workflow_stream(workflow_stream):
-                # 实时推送给前端
                 yield chunk
-                
-                # 尝试从 SSE 格式中提取 ANSWER 内容进行拼接
-                # chunk 格式: "data: {...}\n\n"
                 try:
                     if chunk.startswith("data:"):
                         import json
-                        json_str = chunk[5:].strip()
-                        data = json.loads(json_str)
-                        # 检查新旧字段结构 (kind 或 type)
-                        kind = data.get("content", {}).get("kind") or data.get("type")
-                        text = data.get("content", {}).get("text") or data.get("content")
-                        
+                        data = json.loads(chunk[5:].strip())
+                        kind = data.get("content", {}).get("kind")
+                        text = data.get("content", {}).get("text")
                         if kind == ContentKind.ANSWER and text:
                             full_ai_response += text
+                            if data.get("is_ask_user"):
+                                is_ask_user_response = True
+                                pending_intent = data.get("pending_intent", "")
                 except:
                     pass
 
             logger.info(f"[{request_id}] LangGraph 任务处理完成")
 
-            # 4. 持久化历史对话到 MySQL
-            # 只有当 AI 有实际回答时才保存
+            # 4. 持久化历史对话
             if full_ai_response:
-                # 格式化处理 (去除多余换行)
                 format_result = re.sub(r'\n+', '\n', full_ai_response)
-                
-                # 追加 AI 回复
-                chat_history.append({"role": "assistant", "content": format_result})
-                
-                # 写入数据库
+                msg = {"role": "assistant", "content": format_result}
+                if is_ask_user_response:
+                    msg["is_ask_user"] = True
+                    if pending_intent:
+                        msg["pending_intent"] = pending_intent
+                chat_history.append(msg)
                 session_service.save_history(user_id, session_id, chat_history)
                 logger.info(f"[{request_id}] 会话历史已保存到数据库")
 

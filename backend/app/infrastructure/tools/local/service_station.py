@@ -2,7 +2,6 @@ from infrastructure.database.database_pool import pool
 import json
 import stun
 from pymysql.cursors import DictCursor
-from agents import function_tool
 from infrastructure.tools.mcp.mcp_servers import baidu_mcp_client
 from infrastructure.logging.logger import logger
 import math
@@ -134,8 +133,6 @@ async def resolve_user_location_from_text_raw(
         "source": "fallback"
     }, ensure_ascii=False)
 
-resolve_user_location_from_text = function_tool(resolve_user_location_from_text_raw)
-
 
 def query_nearest_repair_shops_by_coords_raw(lat: float, lng: float, limit: int = 3) -> str:
     """
@@ -173,5 +170,3 @@ def query_nearest_repair_shops_by_coords_raw(lat: float, lng: float, limit: int 
     finally:
         if cursor: cursor.close()
         if connection: connection.close()
-
-query_nearest_repair_shops_by_coords = function_tool(query_nearest_repair_shops_by_coords_raw)

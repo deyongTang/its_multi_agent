@@ -1,163 +1,173 @@
 import json
-from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from infrastructure.logging.logger import logger
+from infrastructure.database.database_pool import DatabasePool
+from infrastructure.redis_client import redis_client
+
+SESSION_TTL = 86400        # 24小时
+SESSION_CACHE_SIZE = 7     # 缓存条数：system(1) + 最近3轮(6)
 
 
 class SessionRepository:
     """会话数据仓储类。
 
-    负责处理底层的会话文件存储、读取和文件系统操作。
-    使用 pathlib 进行现代化的路径管理。
+    Redis  → 历史缓存（最近 SESSION_CACHE_SIZE 条）+ 追问状态，TTL 自动过期
+    MySQL  → 完整对话历史，持久化（唯一索引保证增量写入幂等）
     """
 
-    # 存储目录名称常量
-    STORAGE_DIR_NAME = "user_memories"
+    def _redis_key(self, user_id: str, session_id: str) -> str:
+        return f"session:{user_id}:{session_id}"
 
-    def __init__(self):
-        """初始化 SessionRepository。
+    def _cache_key(self, user_id: str, session_id: str) -> str:
+        return f"session_cache:{user_id}:{session_id}"
 
-        自动定位并创建存储根目录。
-        """
+    def _get_conn(self):
+        return DatabasePool.get_connection()
 
-        current_file = Path(__file__).resolve()
+    def _write_cache(self, ckey: str, messages: List[Dict[str, Any]]) -> None:
+        """将最近 SESSION_CACHE_SIZE 条消息写入 Redis 缓存。"""
+        try:
+            tail = messages[-SESSION_CACHE_SIZE:]
+            redis_client.set(ckey, json.dumps(tail, ensure_ascii=False), ex=SESSION_TTL)
+        except Exception as e:
+            logger.warning(f"写入 Redis 缓存失败（不影响主流程）: {e}")
 
-        self._base_dir = current_file.parent.parent
+    # ------------------------------------------------------------------ #
+    #  load_session  —  先查 Redis 缓存，miss 再查 MySQL                   #
+    # ------------------------------------------------------------------ #
 
-        # 拼接存储路径: backend/app/user_memories
-        self._storage_root = self._base_dir / self.STORAGE_DIR_NAME
+    def load_session(self, user_id: str, session_id: str) -> Optional[List[Dict[str, Any]]]:
+        # 1. 先查 Redis 缓存
+        ckey = self._cache_key(user_id, session_id)
+        try:
+            cached = redis_client.get(ckey)
+            if cached:
+                return json.loads(cached)
+        except Exception as e:
+            logger.warning(f"读取 Redis 缓存失败，降级查 MySQL: {e}")
 
-        # 确保存储根目录存在
-        self._storage_root.mkdir(parents=True, exist_ok=True)
+        # 2. Cache miss，查 MySQL
+        conn = self._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT seq_id, role, content, is_ask_user, pending_intent "
+                    "FROM chat_messages "
+                    "WHERE user_id=%s AND session_id=%s ORDER BY seq_id ASC",
+                    (user_id, session_id),
+                )
+                rows = cur.fetchall()
+        finally:
+            conn.close()
 
-
-    def load_session(
-            self, user_id: str, session_id: str
-    ) -> Optional[List[Dict[str, Any]]]:
-        """从文件加载会话数据。
-
-        Args:
-            user_id: 用户ID。
-            session_id: 会话ID。
-
-        Returns:
-            List[Dict]: 解析后的会话数据（按 seq_id 排序）。
-            None: 如果文件不存在。
-
-        Raises:
-            json.JSONDecodeError: 如果文件内容损坏。
-        """
-        file_path = self._get_file_path(user_id, session_id)
-
-        if not file_path.exists():
+        if not rows:
             return None
 
-        with file_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+        messages = []
+        for seq_id, role, content, is_ask_user, pending_intent in rows:
+            msg: Dict[str, Any] = {"role": role, "content": content, "seq_id": seq_id}
+            if is_ask_user:
+                msg["is_ask_user"] = True
+            if pending_intent:
+                msg["pending_intent"] = pending_intent
+            messages.append(msg)
 
-        # 确保数据按 seq_id 排序（防止并发写入导致的乱序）
-        if data and isinstance(data, list):
-            # 为没有 seq_id 的旧数据自动补充
-            for i, msg in enumerate(data):
-                if "seq_id" not in msg:
-                    msg["seq_id"] = i
-            # 按 seq_id 排序
-            data.sort(key=lambda x: x.get("seq_id", 0))
+        # 3. 回写缓存
+        self._write_cache(ckey, messages)
+        return messages
 
-        return data
+    # ------------------------------------------------------------------ #
+    #  save_session  —  增量写入 MySQL（INSERT IGNORE），更新 Redis 缓存    #
+    # ------------------------------------------------------------------ #
 
-    def save_session(
-            self, user_id: str, session_id: str, data: List[Dict[str, Any]]
-    ) -> None:
-        """保存会话数据到文件。
-
-        Args:
-            user_id: 用户ID。
-            session_id: 会话ID。
-            data: 要保存的数据列表。
-        """
-        file_path = self._get_file_path(user_id, session_id)
-
-        # 确保用户的个人目录存在 (懒加载模式)
-        if not file_path.parent.exists():
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with file_path.open("w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-    def get_all_sessions_metadata(
-            self, user_id: str
-    ) -> List[Tuple[str, str, Union[List, Exception]]]:
-        """获取用户所有会话的元数据和内容。
-
-        Args:
-            user_id: 用户ID。
-
-        Returns:
-            List[Tuple]: 包含 (session_id, create_time, data_or_error) 的列表。
-        """
-        user_dir = self._get_user_directory(user_id)
-
-        if not user_dir.exists():
-            logger.warning(f"用户目录不存在: {user_id}")
-            return []
-
-        results = []
-
+    def save_session(self, user_id: str, session_id: str, data: List[Dict[str, Any]]) -> None:
+        conn = self._get_conn()
         try:
-            # 遍历目录下所有 .json 文件
-            for file_path in user_dir.glob("*.json"):
-                session_id = file_path.stem  # 获取文件名不带后缀部分
+            with conn.cursor() as cur:
+                for msg in data:
+                    cur.execute(
+                        "INSERT IGNORE INTO chat_messages "
+                        "(user_id, session_id, seq_id, role, content, is_ask_user, pending_intent) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        (
+                            user_id,
+                            session_id,
+                            msg.get("seq_id", 0),
+                            msg.get("role", ""),
+                            msg.get("content", ""),
+                            1 if msg.get("is_ask_user") else 0,
+                            msg.get("pending_intent", ""),
+                        ),
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
-                # 获取文件创建时间
-                stat = file_path.stat()
-                create_time = datetime.fromtimestamp(stat.st_ctime).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
+        # 更新 Redis 历史缓存
+        self._write_cache(self._cache_key(user_id, session_id), data)
 
-                try:
-                    with file_path.open("r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    results.append((session_id, create_time, data))
-                except Exception as e:
-                    # 读取或解析失败，返回异常对象
-                    logger.error(f"读取会话文件 {file_path.name} 失败: {e}")
-                    results.append((session_id, create_time, e))
+        # 同步追问状态
+        last_assistant = next(
+            (m for m in reversed(data) if m.get("role") == "assistant"), None
+        )
+        rkey = self._redis_key(user_id, session_id)
+        if last_assistant and last_assistant.get("is_ask_user"):
+            redis_client.hset(rkey, mapping={
+                "is_ask_user": "1",
+                "pending_intent": last_assistant.get("pending_intent", ""),
+            })
+            redis_client.expire(rkey, SESSION_TTL)
+        else:
+            redis_client.delete(rkey)
 
-        except Exception as e:
-            logger.error(f"遍历用户 {user_id} 会话目录失败: {e}")
-            return []
-
-        return results
-
-    def _get_user_directory(self, user_id: str) -> Path:
-        """获取用户的记忆文件夹路径对象。"""
-        return self._storage_root / user_id
-
-    def _get_file_path(self, user_id: str, session_id: str) -> Path:
-        """获取具体会话文件的路径对象。"""
-        return self._get_user_directory(user_id) / f"{session_id}.json"
+    # ------------------------------------------------------------------ #
+    #  get_max_seq_id  —  直接查 MySQL 聚合，避免全量加载                    #
+    # ------------------------------------------------------------------ #
 
     def get_max_seq_id(self, user_id: str, session_id: str) -> int:
-        """获取会话中最大的 seq_id。
+        conn = self._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COALESCE(MAX(seq_id), -1) FROM chat_messages "
+                    "WHERE user_id=%s AND session_id=%s",
+                    (user_id, session_id),
+                )
+                return cur.fetchone()[0]
+        finally:
+            conn.close()
 
-        Args:
-            user_id: 用户ID。
-            session_id: 会话ID。
+    # ------------------------------------------------------------------ #
+    #  get_all_sessions_metadata  —  查询用户所有 session 列表              #
+    # ------------------------------------------------------------------ #
 
-        Returns:
-            int: 最大的 seq_id，如果会话不存在或为空则返回 -1。
-        """
-        data = self.load_session(user_id, session_id)
+    def get_all_sessions_metadata(self, user_id: str) -> List[Tuple[str, str, Union[List, Exception]]]:
+        conn = self._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT session_id, MIN(created_at) "
+                    "FROM chat_messages WHERE user_id=%s GROUP BY session_id",
+                    (user_id,),
+                )
+                sessions = cur.fetchall()
+        finally:
+            conn.close()
 
-        if not data:
-            return -1
+        results = []
+        for session_id, create_time in sessions:
+            try:
+                data = self.load_session(user_id, session_id) or []
+                results.append((session_id, str(create_time), data))
+            except Exception as e:
+                logger.error(f"读取会话 {session_id} 失败: {e}")
+                results.append((session_id, str(create_time), e))
 
-        # 获取所有消息的 seq_id，找出最大值
-        seq_ids = [msg.get("seq_id", 0) for msg in data]
-        return max(seq_ids) if seq_ids else -1
+        return results
 
 
 # 全局单例

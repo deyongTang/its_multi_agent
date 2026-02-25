@@ -10,9 +10,11 @@
 from multi_agent.workflow.state import AgentState
 from infrastructure.logging.logger import logger
 from infrastructure.ai.openai_client import sub_model
+from infrastructure.utils.observability import node_timer
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 
+@node_timer("general_chat")
 async def node_general_chat(state: AgentState) -> AgentState:
     """
     闲聊节点

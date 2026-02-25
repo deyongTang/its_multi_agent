@@ -1,157 +1,127 @@
 """
-LangGraph Workflow Graph Definition (v1.4 - Explicit Sequential Pipeline)
+LangGraph Workflow Graph Definition (v2.0 - Hybrid Architecture)
 
-Implements the explicit fallback logic:
-- Intent -> Strategy -> Dispatch
-- Dispatch (Tech) -> KB -> Check KB -> (if miss) -> Web
-- Dispatch (Info) -> Web
-- Dispatch (Map) -> Tools
+外层显式管道 + 内层自主循环检索子图
+  intent → slot_filling → [检索子图: 自主循环] → verify → generate_report → END
 """
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
 from multi_agent.workflow.state import AgentState
 
-# Redis Checkpointer 支持
-try:
-    from langgraph.checkpoint.redis import RedisSaver
-    from infrastructure.redis_client import redis_client
-    REDIS_AVAILABLE = True
-except ImportError:
-    REDIS_AVAILABLE = False
-
-# Import Nodes
+# Nodes
 from multi_agent.workflow.nodes.intent_node import node_intent
 from multi_agent.workflow.nodes.slot_filling_node import node_slot_filling
 from multi_agent.workflow.nodes.ask_user_node import node_ask_user
 from multi_agent.workflow.nodes.general_chat_node import node_general_chat
-
-# Phase 2 Nodes
-from multi_agent.workflow.nodes.strategy_gen_node import node_strategy_gen
-from multi_agent.workflow.nodes.search_nodes import node_query_knowledge, node_search_web, node_query_local_tools
-from multi_agent.workflow.nodes.merge_verify_nodes import node_merge_results, node_verify
+from multi_agent.workflow.nodes.merge_verify_nodes import node_verify
 from multi_agent.workflow.nodes.action_nodes import node_escalate, node_generate_report
 
-# Import Edges
-from multi_agent.workflow.edges import (
-    route_intent,
-    route_slot_check,
-)
-# 新的显式路由器
-from multi_agent.workflow.edges.routers_phase2 import (
-    route_dispatch,
-    route_kb_check,
-    route_verify_result
-)
+# Retrieval SubGraph
+from multi_agent.workflow.retrieval_subgraph import build_retrieval_subgraph
+
+# Edges
+from multi_agent.workflow.edges import route_intent, route_slot_check
+from multi_agent.workflow.edges.routers_phase2 import route_verify_result
 
 from infrastructure.logging.logger import logger
 
+
+def _get_last_user_query(state: AgentState) -> str:
+    for msg in reversed(state.get("messages", [])):
+        if msg.type == "human":
+            return msg.content
+    return ""
+
+
+# 预编译检索子图（避免每次请求重复编译）
+_retrieval_subgraph = build_retrieval_subgraph()
+
+
+async def node_retrieval(state: AgentState) -> dict:
+    """
+    检索子图包装节点：桥接 AgentState ↔ RetrievalSubState
+    将主图状态映射到子图，运行子图，将结果写回主图
+    """
+    user_query = _get_last_user_query(state)
+    intent = state.get("current_intent", "")
+    slots = state.get("slots", {})
+    # 追问场景：用原始问题 + 用户补充信息合并为检索 query
+    original_query = state.get("original_query") or user_query
+    combined_query = f"{original_query} {user_query}".strip() if original_query != user_query else user_query
+    # 多轮对话：把 slots 中提取到的关键信息（如地点）拼入 query
+    slot_context = " ".join(str(v) for v in slots.values() if v)
+    if slot_context and slot_context not in combined_query:
+        combined_query = f"{combined_query} {slot_context}".strip()
+
+    # 构建子图输入
+    sub_input = {
+        "query": combined_query,
+        "original_query": original_query,
+        "intent": intent,
+        "slots": slots,
+        "source": "",
+        "documents": [],
+        "is_sufficient": False,
+        "suggestion": "",
+        "loop_count": 0,
+        "max_retries": 3,
+    }
+
+    # 运行子图
+    result = await _retrieval_subgraph.ainvoke(sub_input)
+
+    # 将子图结果写回主图
+    docs = result.get("documents", [])
+    logger.info(f"[Retrieval SubGraph] 完成，返回 {len(docs)} 条结果，循环 {result.get('loop_count', 0)} 次")
+
+    return {"retrieved_documents": docs}
+
+
 def create_workflow_graph():
-    """
-    Builds the compiled LangGraph application.
-    """
-    logger.info("Building LangGraph v1.4 Workflow (Explicit Pipeline)...")
-    
+    """构建 v2.0 混合架构工作流"""
+    logger.info("Building LangGraph v2.0 Workflow (Hybrid Architecture)...")
+
     workflow = StateGraph(AgentState)
-    
-    # --- 1. Add Nodes ---
+
+    # --- Nodes ---
     workflow.add_node("intent", node_intent)
     workflow.add_node("slot_filling", node_slot_filling)
     workflow.add_node("ask_user", node_ask_user)
     workflow.add_node("general_chat", node_general_chat)
-    
-    workflow.add_node("strategy_gen", node_strategy_gen)
-    
-    workflow.add_node("query_knowledge", node_query_knowledge)
-    workflow.add_node("search_web", node_search_web)
-    workflow.add_node("query_local_tools", node_query_local_tools)
-    
-    workflow.add_node("merge_results", node_merge_results)
+    workflow.add_node("retrieval", node_retrieval)
     workflow.add_node("verify", node_verify)
-
     workflow.add_node("escalate", node_escalate)
     workflow.add_node("generate_report", node_generate_report)
-    
-    # --- 2. Set Entry Point ---
+
+    # --- Entry ---
     workflow.set_entry_point("intent")
-    
-    # --- 3. Define Edges & Routing ---
-    
-    # Intent Processing
-    workflow.add_conditional_edges(
-        "intent",
-        route_intent,
-        {
-            "general_chat": "general_chat",
-            "slot_filling": "slot_filling",
-        }
-    )
-    
-    # Slot Filling Loop
-    workflow.add_conditional_edges(
-        "slot_filling",
-        route_slot_check,
-        {
-            "ask_user": "ask_user",
-            "strategy_gen": "strategy_gen"
-        }
-    )
-    
-    # --- Explicit Dispatching (No more parallel fan-out) ---
-    workflow.add_conditional_edges(
-        "strategy_gen",
-        route_dispatch,
-        {
-            "query_knowledge": "query_knowledge",
-            "search_web": "search_web",
-            "query_local_tools": "query_local_tools"
-        }
-    )
-    
-    # --- Sequential Fallback Logic ---
-    
-    # 1. Knowledge Base Path: KB -> Check -> (Web OR Merge)
-    workflow.add_conditional_edges(
-        "query_knowledge",
-        route_kb_check,
-        {
-            "merge_results": "merge_results",
-            "search_web": "search_web"  # 显式指向 Web 兜底
-        }
-    )
-    
-    # 2. Web Search Path: Web -> Merge
-    workflow.add_edge("search_web", "merge_results")
-    
-    # 3. Tools Path: Tools -> Merge
-    workflow.add_edge("query_local_tools", "merge_results")
-    
-    # --- Verification & Reporting ---
-    
-    workflow.add_edge("merge_results", "verify")
-    
-    workflow.add_conditional_edges(
-        "verify",
-        route_verify_result,
-        {
-            "generate_report": "generate_report",
-            "escalate": "escalate"
-        }
-    )
-    
+
+    # --- Edges ---
+    workflow.add_conditional_edges("intent", route_intent, {
+        "general_chat": "general_chat",
+        "slot_filling": "slot_filling",
+    })
+
+    workflow.add_conditional_edges("slot_filling", route_slot_check, {
+        "ask_user": "ask_user",
+        "retrieval": "retrieval",
+    })
+
+    workflow.add_edge("retrieval", "verify")
+
+    workflow.add_conditional_edges("verify", route_verify_result, {
+        "generate_report": "generate_report",
+        "escalate": "escalate",
+    })
+
     # End Nodes
     workflow.add_edge("general_chat", END)
     workflow.add_edge("ask_user", END)
     workflow.add_edge("generate_report", END)
     workflow.add_edge("escalate", END)
-    
-    # --- 4. Compile ---
-    if REDIS_AVAILABLE:
-        checkpointer = RedisSaver(redis_client) if REDIS_AVAILABLE else MemorySaver()
-    else:
-        checkpointer = MemorySaver()
 
-    app = workflow.compile(checkpointer=checkpointer)
+    # --- Compile ---
+    app = workflow.compile()
 
-    logger.info("LangGraph v1.4 Compiled Successfully.")
+    logger.info("LangGraph v2.0 Compiled Successfully.")
     return app
