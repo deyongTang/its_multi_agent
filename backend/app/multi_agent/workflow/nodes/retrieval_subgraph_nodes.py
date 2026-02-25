@@ -8,7 +8,7 @@ import json
 from infrastructure.logging.logger import logger
 from infrastructure.ai.openai_client import sub_model
 from infrastructure.tools.local.knowledge_base import query_knowledge
-from infrastructure.tools.mcp.mcp_servers import get_search_mcp_client, get_baidu_mcp_client
+from infrastructure.tools.mcp.mcp_servers import create_search_mcp_client, create_baidu_mcp_client
 from infrastructure.tools.local.service_station import (
     resolve_user_location_from_text_raw,
     query_nearest_repair_shops_by_coords_raw,
@@ -200,16 +200,16 @@ async def _search_kb(query: str) -> list:
 
 async def _search_web(query: str) -> list:
     try:
-        mcp_client = get_search_mcp_client()
-        result = await mcp_client.call_tool("bailian_web_search", {"query": query})
-        data = json.loads(result.content[0].text)
-        results = data.get("pages", data.get("search_results", []))
-        return [
-            {"source": "WebSearch", "content": r.get("snippet", r.get("content", "")), "title": r.get("title", "")}
-            for r in results[:3]
-        ]
+        async with create_search_mcp_client() as mcp_client:
+            result = await mcp_client.call_tool("bailian_web_search", {"query": query})
+            data = json.loads(result.content[0].text)
+            results = data.get("pages", data.get("search_results", []))
+            return [
+                {"source": "WebSearch", "content": r.get("snippet", r.get("content", "")), "title": r.get("title", "")}
+                for r in results[:3]
+            ]
     except Exception as e:
-        logger.error(f"[Search Web] {e}")
+        logger.error(f"[Search Web] {type(e).__name__}: {e}", exc_info=True)
         return []
 
 
@@ -233,11 +233,11 @@ async def _search_local(intent: str, slots: dict) -> list:
     elif intent == "poi_navigation":
         destination = slots.get("destination", "")
         try:
-            client = get_baidu_mcp_client()
-            res = await client.call_tool("map_poi_search", {"query": destination, "region": "全国"})
-            data = json.loads(res.content[0].text)
-            for poi in data.get("results", [])[:3]:
-                results.append({"source": "BaiduMap", "content": f"地点: {poi['name']}\n地址: {poi.get('address', '不详')}", "metadata": poi})
+            async with create_baidu_mcp_client() as client:
+                res = await client.call_tool("map_poi_search", {"query": destination, "region": "全国"})
+                data = json.loads(res.content[0].text)
+                for poi in data.get("results", [])[:3]:
+                    results.append({"source": "BaiduMap", "content": f"地点: {poi['name']}\n地址: {poi.get('address', '不详')}", "metadata": poi})
         except Exception as e:
             logger.error(f"[Search Local] poi error: {e}")
 

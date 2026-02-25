@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ITS 多智能体 — 全链路测试</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #0f172a; color: #e2e8f0; padding: 20px; }
+h1 { text-align: center; margin-bottom: 8px; font-size: 22px; color: #38bdf8; }
+.subtitle { text-align: center; color: #64748b; margin-bottom: 20px; font-size: 13px; }
+
+.toolbar {
+  display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap;
+}
+.toolbar button {
+  padding: 8px 18px; border: 1px solid #334155; border-radius: 6px;
+  background: #1e293b; color: #e2e8f0; cursor: pointer; font-size: 13px;
+  transition: all .2s;
+}
+.toolbar button:hover { background: #334155; border-color: #38bdf8; }
+.toolbar button.running { background: #0c4a6e; border-color: #38bdf8; cursor: wait; }
+.toolbar button.primary { background: #0369a1; border-color: #0ea5e9; }
+
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+.card {
+  background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+  padding: 16px; position: relative; transition: border-color .3s;
+}
+.card.pass { border-color: #22c55e; }
+.card.fail { border-color: #ef4444; }
+.card.running { border-color: #eab308; }
+.card.skip { border-color: #64748b; opacity: .6; }
+
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.card-id { font-weight: 700; color: #38bdf8; font-size: 14px; }
+.card-status {
+  font-size: 11px; padding: 2px 10px; border-radius: 20px; font-weight: 600;
+}
+.card-status.pending { background: #334155; color: #94a3b8; }
+.card-status.running { background: #854d0e; color: #fde047; }
+.card-status.pass { background: #14532d; color: #4ade80; }
+.card-status.fail { background: #7f1d1d; color: #fca5a5; }
+.card-status.skip { background: #334155; color: #64748b; }
+
+.card-purpose { font-size: 12px; color: #94a3b8; margin-bottom: 10px; }
+.card-input { font-size: 12px; color: #cbd5e1; background: #0f172a; padding: 6px 10px; border-radius: 4px; margin-bottom: 8px; }
+
+.events-box {
+  max-height: 200px; overflow-y: auto; font-size: 11px; font-family: 'SF Mono', monospace;
+  background: #0f172a; border-radius: 4px; padding: 8px; line-height: 1.6;
+}
+.events-box .ev-process { color: #38bdf8; }
+.events-box .ev-thinking { color: #a78bfa; }
+.events-box .ev-answer { color: #4ade80; }
+.events-box .ev-finish { color: #64748b; }
+.events-box .ev-error { color: #ef4444; }
+
+.assertions { margin-top: 8px; font-size: 11px; }
+.assertions div { padding: 2px 0; }
+.assertions .ok { color: #4ade80; }
+.assertions .fail { color: #fca5a5; }
+
+.summary-bar {
+  margin-top: 20px; text-align: center; padding: 12px;
+  background: #1e293b; border-radius: 8px; font-size: 14px;
+}
+</style>
+</head>
+<body>
+<h1>ITS 多智能体系统 — 全链路测试</h1>
+<p class="subtitle">POST /api/query · SSE 流式 · http://127.0.0.1:8000</p>
+
+<div class="toolbar">
+  <button class="primary" onclick="runAll()">▶ 运行全部</button>
+  <button onclick="runOne('TC-01')">TC-01 闲聊</button>
+  <button onclick="runOne('TC-02')">TC-02 追问</button>
+  <button onclick="runOne('TC-03')">TC-03 KB命中</button>
+  <button onclick="runOne('TC-04')">TC-04 换源Web</button>
+  <button onclick="runOne('TC-05')">TC-05 升级人工</button>
+  <button onclick="runOne('TC-06')">TC-06 服务站</button>
+  <button onclick="runOne('TC-07')">TC-07 导航</button>
+  <button onclick="runOne('TC-09')">TC-09 流式过滤</button>
+</div>
+
+<div class="grid" id="grid"></div>
+<div class="summary-bar" id="summary">就绪 — 点击按钮开始测试</div>
+
+<script>
+const API = 'http://127.0.0.1:8000/api/query';
+</script>
+<script>
+// ── Test Case Definitions ──
+const TEST_CASES = [
+  {
+    id: 'TC-01', name: '闲聊场景',
+    purpose: '验证意图识别路由到 general_chat，不触发检索',
+    input: '你好，今天天气真不错',
+    assertions: [
+      { name: '出现 general_chat 节点', fn: ctx => ctx.processes.some(p => p.includes('general_chat')) },
+      { name: '无 slot_filling 节点', fn: ctx => !ctx.processes.some(p => p.includes('slot_filling')) },
+      { name: '无 retrieval 节点', fn: ctx => !ctx.processes.some(p => p.includes('retrieval')) },
+      { name: '有友好回复', fn: ctx => ctx.answer.length > 5 },
+    ]
+  },
+  {
+    id: 'TC-02', name: '槽位不完整追问',
+    purpose: '验证槽位缺失时走 ask_user 分支',
+    input: '电脑蓝屏了',
+    assertions: [
+      { name: '出现 ask_user 节点', fn: ctx => ctx.processes.some(p => p.includes('ask_user')) },
+      { name: '无 retrieval 节点', fn: ctx => !ctx.processes.some(p => p.includes('retrieval')) },
+      { name: '返回追问话术', fn: ctx => ctx.answer.length > 5 },
+      { name: 'is_ask_user=true', fn: ctx => ctx.hasAskUser },
+    ]
+  },
+  {
+    id: 'TC-03', name: 'KB命中全链路',
+    purpose: '验证技术问题完整走完检索，知识库返回答案',
+    input: '我的 ThinkPad X1 Carbon 升级系统后蓝屏，错误代码 0x0000007E',
+    skip: true, skipReason: '需要知识库服务',
+    assertions: []
+  },
+  {
+    id: 'TC-04', name: 'KB未命中换源Web',
+    purpose: '验证 KB 无结果时自动切换到 Web 搜索',
+    input: '联想 Legion 7i 2025款 散热风扇异响怎么处理',
+    skip: true, skipReason: '需要知识库服务',
+    assertions: []
+  },
+  {
+    id: 'TC-05', name: '检索不合格升级人工',
+    purpose: '验证 verify 节点质量把关，不相关时走 escalate',
+    input: 'xyzabc123 型号主板烧了怎么修',
+    assertions: [
+      { name: '出现 escalate 节点', fn: ctx => ctx.processes.some(p => p.includes('escalate')) },
+      { name: '包含人工客服话术', fn: ctx => /人工|客服|转接|工程师/.test(ctx.answer) },
+      { name: '无 generate_report', fn: ctx => !ctx.processes.some(p => p.includes('generate_report')) },
+    ]
+  },
+  {
+    id: 'TC-06', name: '服务站查询',
+    purpose: '验证服务站意图走 MySQL + 坐标解析',
+    input: '北京朝阳区附近有联想服务站吗',
+    assertions: [
+      { name: '出现 retrieval 节点', fn: ctx => ctx.processes.some(p => p.includes('retrieval')) },
+      { name: '包含服务站信息', fn: ctx => /服务站|地址|电话|联想/.test(ctx.answer) },
+      { name: '有回复内容', fn: ctx => ctx.answer.length > 10 },
+    ]
+  },
+  {
+    id: 'TC-07', name: 'POI导航查询',
+    purpose: '验证导航意图调用百度地图 MCP',
+    input: '帮我导航到联想北京总部',
+    assertions: [
+      { name: '调用地图工具', fn: ctx => ctx.processes.some(p => /map|地图|poi|导航/.test(p)) },
+      { name: '包含地点信息', fn: ctx => /地址|位置|联想|北京/.test(ctx.answer) },
+      { name: '有回复内容', fn: ctx => ctx.answer.length > 10 },
+    ]
+  },
+  {
+    id: 'TC-09', name: '流式输出过滤',
+    purpose: '验证 ANSWER 仅来自答案节点，中间节点不泄漏',
+    input: 'ThinkPad X1 蓝屏，错误代码 0x00000050',
+    skip: true, skipReason: '需要知识库服务',
+    assertions: []
+  },
+];
+</script>
+<script>
+// ── State ──
+let results = {};
+let sessionCounter = 0;
+
+// ── Render ──
+function render() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  for (const tc of TEST_CASES) {
+    const r = results[tc.id] || { status: tc.skip ? 'skip' : 'pending', events: [], assertResults: [] };
+    const card = document.createElement('div');
+    card.className = `card ${r.status}`;
+    card.innerHTML = buildCardHTML(tc, r);
+    grid.appendChild(card);
+  }
+  updateSummary();
+}
+
+function buildCardHTML(tc, r) {
+  let html = `
+    <div class="card-header">
+      <span class="card-id">${tc.id} ${tc.name}</span>
+      <span class="card-status ${r.status}">${statusLabel(r.status, tc)}</span>
+    </div>
+    <div class="card-purpose">${tc.purpose}</div>
+    <div class="card-input">📝 ${tc.input}</div>
+  `;
+  if (r.events.length > 0) {
+    html += `<div class="events-box">`;
+    for (const ev of r.events) {
+      html += `<div class="ev-${ev.kind}">${escapeHtml(ev.text)}</div>`;
+    }
+    html += `</div>`;
+  }
+  if (r.assertResults.length > 0) {
+    html += `<div class="assertions">`;
+    for (const a of r.assertResults) {
+      html += `<div class="${a.ok ? 'ok' : 'fail'}">${a.ok ? '✅' : '❌'} ${a.name}</div>`;
+    }
+    html += `</div>`;
+  }
+  return html;
+}
+
+function statusLabel(s, tc) {
+  if (s === 'skip') return `⏭ 跳过: ${tc.skipReason || ''}`;
+  return { pending: '⏳ 待运行', running: '🔄 运行中', pass: '✅ 通过', fail: '❌ 失败' }[s] || s;
+}
+
+function escapeHtml(t) {
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function updateSummary() {
+  const total = TEST_CASES.filter(t => !t.skip).length;
+  const passed = Object.values(results).filter(r => r.status === 'pass').length;
+  const failed = Object.values(results).filter(r => r.status === 'fail').length;
+  const running = Object.values(results).filter(r => r.status === 'running').length;
+  const bar = document.getElementById('summary');
+  if (running > 0) {
+    bar.textContent = `运行中... ${passed} 通过 / ${failed} 失败 / ${running} 进行中 / ${total} 总计`;
+    bar.style.color = '#eab308';
+  } else if (failed > 0) {
+    bar.textContent = `完成 — ${passed} 通过 / ${failed} 失败 / ${total} 总计`;
+    bar.style.color = '#ef4444';
+  } else if (passed === total) {
+    bar.textContent = `全部通过 ✅ ${passed}/${total}`;
+    bar.style.color = '#4ade80';
+  } else {
+    bar.textContent = `就绪 — 点击按钮开始测试`;
+    bar.style.color = '#94a3b8';
+  }
+}
+</script>
+<script>
+// ── SSE Runner ──
+async function runTestCase(tc) {
+  if (tc.skip) return;
+
+  const sid = `test_session_${Date.now()}_${++sessionCounter}`;
+  results[tc.id] = { status: 'running', events: [], assertResults: [] };
+  render();
+
+  const ctx = { processes: [], answer: '', hasAskUser: false, answerNodes: [], allPackets: [] };
+
+  try {
+    const resp = await fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: tc.input,
+        context: { user_id: 'test_user', session_id: sid }
+      })
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const jsonStr = line.slice(5).trim();
+        if (!jsonStr) continue;
+
+        try {
+          const packet = JSON.parse(jsonStr);
+          ctx.allPackets.push(packet);
+          processPacket(tc.id, packet, ctx);
+        } catch (e) { /* skip malformed */ }
+      }
+    }
+
+    // Process remaining buffer
+    if (buffer.startsWith('data:')) {
+      try {
+        const packet = JSON.parse(buffer.slice(5).trim());
+        ctx.allPackets.push(packet);
+        processPacket(tc.id, packet, ctx);
+      } catch (e) { /* skip */ }
+    }
+
+    // Run assertions
+    runAssertions(tc, ctx);
+
+  } catch (err) {
+    results[tc.id].events.push({ kind: 'error', text: `错误: ${err.message}` });
+    results[tc.id].status = 'fail';
+  }
+
+  render();
+}
+
+function processPacket(tcId, packet, ctx) {
+  const r = results[tcId];
+  const content = packet.content || {};
+  const kind = (content.kind || '').toLowerCase();
+  const text = content.text || '';
+  const contentType = content.contentType || '';
+
+  if (contentType === 'sagegpt/finish') {
+    r.events.push({ kind: 'finish', text: '── 流结束 ──' });
+    return;
+  }
+
+  if (kind === 'process') {
+    ctx.processes.push(text);
+    r.events.push({ kind: 'process', text });
+  } else if (kind === 'thinking') {
+    const short = text.length > 80 ? text.slice(0, 80) + '...' : text;
+    r.events.push({ kind: 'thinking', text: `💭 ${short}` });
+  } else if (kind === 'answer') {
+    ctx.answer += text;
+    r.events.push({ kind: 'answer', text: `💬 ${text.slice(0, 120)}${text.length > 120 ? '...' : ''}` });
+  }
+
+  if (packet.is_ask_user) ctx.hasAskUser = true;
+}
+
+function runAssertions(tc, ctx) {
+  const r = results[tc.id];
+  let allPass = true;
+  for (const a of tc.assertions) {
+    let ok = false;
+    try { ok = a.fn(ctx); } catch (e) { ok = false; }
+    r.assertResults.push({ name: a.name, ok });
+    if (!ok) allPass = false;
+  }
+  r.status = tc.assertions.length === 0 ? 'pass' : (allPass ? 'pass' : 'fail');
+}
+</script>
+<script>
+// ── Controls ──
+async function runOne(id) {
+  const tc = TEST_CASES.find(t => t.id === id);
+  if (tc) await runTestCase(tc);
+}
+
+async function runAll() {
+  for (const tc of TEST_CASES) {
+    if (!tc.skip) await runTestCase(tc);
+  }
+}
+
+// ── Init ──
+render();
+</script>
+</body>
+</html>

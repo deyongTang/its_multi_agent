@@ -3,7 +3,7 @@ import json
 from multi_agent.workflow.state import AgentState
 from infrastructure.logging.logger import logger 
 from infrastructure.tools.local.knowledge_base import query_knowledge
-from infrastructure.tools.mcp.mcp_servers import get_search_mcp_client, get_baidu_mcp_client
+from infrastructure.tools.mcp.mcp_servers import create_search_mcp_client, create_baidu_mcp_client
 from infrastructure.tools.local.service_station import resolve_user_location_from_text_raw, query_nearest_repair_shops_by_coords_raw
 
 def get_last_user_query(state: AgentState) -> str:
@@ -44,21 +44,17 @@ async def node_search_web(state: AgentState) -> dict:
     logger.info(f"[Web Search] Querying: {user_query}")
 
     try:
-        mcp_client = get_search_mcp_client()
-        result = await mcp_client.call_tool("bailian_web_search", {"query": user_query})
-        logger.info(f"[Web Search] result: {result}")
-
-        # 解析 MCP 返回的 TextContent
-        content_text = result.content[0].text
-        data = json.loads(content_text)
-
-        results = data.get("pages", data.get("search_results", []))
-        formatted_results = [
-            {"source": "WebSearch", "content": r.get("snippet", r.get("content", "")), "title": r.get("title", "")}
-            for r in results[:3]
-        ]
-
-        return {"retrieved_documents": formatted_results}
+        async with create_search_mcp_client() as mcp_client:
+            result = await mcp_client.call_tool("bailian_web_search", {"query": user_query})
+            logger.info(f"[Web Search] result: {result}")
+            content_text = result.content[0].text
+            data = json.loads(content_text)
+            results = data.get("pages", data.get("search_results", []))
+            formatted_results = [
+                {"source": "WebSearch", "content": r.get("snippet", r.get("content", "")), "title": r.get("title", "")}
+                for r in results[:3]
+            ]
+            return {"retrieved_documents": formatted_results}
     except Exception as e:
         logger.error(f"[Web Search] MCP 服务异常: {type(e).__name__}: {e}")
         logger.warning("[Web Search] MCP 服务不可用，返回空结果（将触发人工升级）")
@@ -104,14 +100,13 @@ async def node_query_local_tools(state: AgentState) -> dict:
         destination = slots.get("destination", "")
         logger.info(f"[POI Navigation] Searching for: {destination}")
         try:
-            baidu_client = get_baidu_mcp_client()
-            res = await baidu_client.call_tool("map_poi_search", {"query": destination, "region": "全国"})
-            data = json.loads(res.content[0].text)
-            
-            pois = data.get("results", [])
-            for poi in pois[:3]:
-                content = f"地点: {poi['name']}\n地址: {poi.get('address', '不详')}"
-                results.append({"source": "BaiduMap", "content": content, "metadata": poi})
+            async with create_baidu_mcp_client() as baidu_client:
+                res = await baidu_client.call_tool("map_poi_search", {"query": destination, "region": "全国"})
+                data = json.loads(res.content[0].text)
+                pois = data.get("results", [])
+                for poi in pois[:3]:
+                    content = f"地点: {poi['name']}\n地址: {poi.get('address', '不详')}"
+                    results.append({"source": "BaiduMap", "content": content, "metadata": poi})
         except Exception as e:
             logger.info(f"[POI Navigation] Exception: {e}")
 
