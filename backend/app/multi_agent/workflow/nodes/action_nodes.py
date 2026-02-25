@@ -2,7 +2,9 @@ from multi_agent.workflow.state import AgentState
 from infrastructure.logging.logger import logger
 from infrastructure.ai.openai_client import main_model
 from infrastructure.utils.observability import node_timer
+from infrastructure.utils.resilience import async_retry_with_timeout
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
+import asyncio
 
 def node_expand_query(state: AgentState) -> dict:
     """
@@ -102,7 +104,8 @@ async def _synthesize_multi_source(state: AgentState, docs: list, intent: str) -
     else:
         user_query = last_user_query or original_query
 
-    try:
+    async def _collect_stream():
+        """收集 astream token，保持在节点上下文内以便 astream_events 追踪"""
         chunks = []
         async for chunk in main_model.astream([
             report_prompt,
@@ -110,12 +113,17 @@ async def _synthesize_multi_source(state: AgentState, docs: list, intent: str) -
         ]):
             if chunk.content:
                 chunks.append(chunk.content)
+        return "".join(chunks).strip()
 
-        answer = "".join(chunks).strip()
+    try:
+        answer = await asyncio.wait_for(_collect_stream(), timeout=60)
         return {
             "final_report": {"summary": answer, "doc_count": len(docs)},
             "messages": [AIMessage(content=answer)]
         }
+    except asyncio.TimeoutError:
+        logger.error("Report generation timed out (60s)")
+        return {"messages": [AIMessage(content="抱歉，生成回答超时，请稍后重试。")]}
     except Exception as e:
         logger.error(f"Report generation failed: {e}")
         fallback = "根据找到的信息：\n\n" + "\n\n".join(

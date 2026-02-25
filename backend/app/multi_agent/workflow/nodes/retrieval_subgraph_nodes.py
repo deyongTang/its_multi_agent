@@ -18,6 +18,20 @@ from infrastructure.utils.observability import node_timer
 from multi_agent.workflow.state import RetrievalSubState
 
 
+@async_retry_with_timeout(timeout_s=20, max_retries=2)
+async def _llm_evaluate(prompt: str) -> str:
+    """LLM 评估调用（带超时重试）"""
+    resp = await sub_model.ainvoke([{"role": "user", "content": prompt}])
+    return resp.content if isinstance(resp.content, str) else str(resp.content)
+
+
+@async_retry_with_timeout(timeout_s=20, max_retries=2)
+async def _llm_rewrite(prompt: str) -> str:
+    """LLM 改写调用（带超时重试）"""
+    resp = await sub_model.ainvoke([{"role": "user", "content": prompt}])
+    return resp.content.strip()
+
+
 @node_timer("retrieval.dispatch")
 def node_retrieval_dispatch(state: RetrievalSubState) -> dict:
     """
@@ -112,8 +126,7 @@ async def node_retrieval_evaluate(state: RetrievalSubState) -> dict:
 {{"sufficient": true/false, "reason": "简短理由", "suggestion": "pass"或"retry_same"或"switch_source"}}"""
 
     try:
-        resp = await sub_model.ainvoke([{"role": "user", "content": prompt}])
-        text = resp.content if isinstance(resp.content, str) else str(resp.content)
+        text = await _llm_evaluate(prompt)
         result = safe_parse_json(text, {"sufficient": True, "suggestion": "pass"})
         is_sufficient = result.get("sufficient", True)
         suggestion = result.get("suggestion", "pass")
@@ -161,8 +174,7 @@ async def node_retrieval_rewrite(state: RetrievalSubState) -> dict:
 改写后的查询:"""
 
     try:
-        resp = await sub_model.ainvoke([{"role": "user", "content": prompt}])
-        new_query = resp.content.strip()
+        new_query = await _llm_rewrite(prompt)
         if not new_query or len(new_query) > 200:
             new_query = original_query
         logger.info(f"[Rewrite] query 改写: '{current_query}' → '{new_query}'")
