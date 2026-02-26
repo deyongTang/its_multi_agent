@@ -101,7 +101,7 @@ graph TD
 *   **确定性兜底**: 最多循环 3 次，超限强制退出
 
 #### 3.1.3 异常熔断机制
-*   **追问上限**: `ask_user_count` 最多 3 次，超限转人工。
+*   **追问上限**: `ask_user_count` 最多 3 次，超限时节点设置 `need_human_help=True`，由 `route_ask_user_result` 条件边路由到 `escalate`。
 *   **检索上限**: 子图 `max_retries=3`，超限强制退出带降级标记。
 *   **会话持久化**: 支持 Redis checkpointer（生产）或 MemorySaver（开发）。
 
