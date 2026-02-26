@@ -92,7 +92,7 @@ graph TD
 
 ### 4.2 槽位路由：`route_slot_check`
 
-*   有缺失槽位 → `ask_user`（追问，最多 3 轮）→ END（等待用户回复）
+*   有缺失槽位 → `ask_user`（追问，最多 3 轮）→ END（等待用户回复）；超限（count ≥ 3）→ `escalate`
 *   槽位齐全 → `retrieval`（进入检索子图）
 
 ### 4.3 检索子图内部路由
