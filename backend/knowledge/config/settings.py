@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     TOP_ROUGH: int = 50
     TOP_FINAL: int = 5
 
+    # Reranker 配置（硅基流动）
+    SILICONFLOW_API_KEY: str = Field(default="")
+    RERANKER_BASE_URL: str = Field(default="https://api.siliconflow.cn/v1")
+    RERANKER_MODEL: str = Field(default="BAAI/bge-reranker-v2-m3")
+    RERANKER_TOP_N: int = Field(default=50)
+    RERANKER_ENABLED: bool = Field(default=False)
+
     # Elasticsearch 配置
     ES_HOST: str = Field(default="118.195.198.38")
     ES_PORT: int = Field(default=9200)
