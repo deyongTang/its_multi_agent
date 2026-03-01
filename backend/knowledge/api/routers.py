@@ -315,8 +315,7 @@ async def retrieve_chunks(
 
     try:
         es_service = get_es_retrieval_service()
-        results = await run_in_threadpool(
-            es_service.retrieve,
+        results = await es_service.retrieve(
             request.question,
             top_k=request.top_k,
             return_full_content=True
@@ -356,11 +355,11 @@ async def query_knowledge_sync(
         rewritten_query = await run_in_threadpool(query_service.rewrite_query, request.question)
 
         # 2. 检索
-        results_original = await run_in_threadpool(es_service.retrieve, request.question, top_k=5, return_full_content=True)
+        results_original = await es_service.retrieve(request.question, top_k=5, return_full_content=True)
 
         results_rewritten = []
         if rewritten_query and rewritten_query != request.question:
-            results_rewritten = await run_in_threadpool(es_service.retrieve, rewritten_query, top_k=5, return_full_content=True)
+            results_rewritten = await es_service.retrieve(rewritten_query, top_k=5, return_full_content=True)
 
         # 3. 去重合并
         from langchain_core.documents import Document
@@ -416,8 +415,7 @@ async def query_knowledge(
             
             # (A) 核心层：基于原始问题检索 (Direct Matches)
             # 使用 RRF (BM25 + Vector) 保证原始意图的精确性和语义性
-            results_original = await run_in_threadpool(
-                es_service.retrieve,
+            results_original = await es_service.retrieve(
                 request.question,
                 top_k=5,
                 return_full_content=True
@@ -427,8 +425,7 @@ async def query_knowledge(
             # (B) 参考层：基于重写问题检索 (Supplementary Matches)
             results_rewritten = []
             if rewritten_query and rewritten_query != request.question:
-                results_rewritten = await run_in_threadpool(
-                    es_service.retrieve,
+                results_rewritten = await es_service.retrieve(
                     rewritten_query,
                     top_k=5,
                     return_full_content=True
