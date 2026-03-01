@@ -80,13 +80,35 @@ $$ Score_{RRF} = \sum_{j \in \{BM25, Vector\}} \frac{1}{k + rank_j(d)} $$
 **理由：**
 我们的系统面向的是非结构化文档，用户提问方式多变（模糊描述 vs 精确报错）。加权求和方案无法在不进行大量特定领域微调的情况下，同时平衡这两类查询。RRF 提供了一种“开箱即用”的高质量融合基线，显著提升了检索的召回率（Recall）和平均准确率（MAP）。
 
-## 6. 后续优化方向
-目前 RRF 的实现是串行的（先查 A 再查 B）。为了进一步降低延迟，计划在未来引入 `asyncio.gather` 并发执行两路检索：
+## 6. 演进历程与后续方向
+
+### V3.3 已完成（精度层升级）
+
+| 升级点 | 内容 |
+| :--- | :--- |
+| **向量检索引擎** | `script_score + match_all`（O(n)）→ ES Native `knn`（HNSW，O(log n)） |
+| **增加精排层** | RRF 粗排后新增 Cross-Encoder Reranker（硅基流动 `bge-reranker-v2-m3` API） |
+| **异步化** | `retrieve()` 升级为 `async def`，Reranker 通过 `httpx.AsyncClient` 非阻塞调用 |
+
+V3.3 后完整的 RAG 检索漏斗：
+```
+用户 Query
+  → BM25 检索 + Native KNN 检索（各取 Top-50）
+  → RRF 融合（Top-50 候选）
+  → Cross-Encoder 精排（Top-5）
+  → 获取父文档 → LLM
+```
+
+### 后续优化方向
+
+目前两路检索（BM25 + KNN）是串行执行。为了进一步降低延迟，计划引入 `asyncio.gather` 并发执行：
 
 ```python
-# Future Optimization Plan
+# 计划优化：并发执行两路检索，减少串行等待
 results_keyword, results_vector = await asyncio.gather(
     self._keyword_search_async(query),
     self._vector_search_async(query)
 )
 ```
+
+预计可将检索阶段延迟降低 30%~50%（取决于 ES 响应时间）。
