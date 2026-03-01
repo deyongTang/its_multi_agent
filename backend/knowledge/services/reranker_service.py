@@ -4,7 +4,7 @@ Reranker 服务封装
 """
 
 from typing import List, Dict, Any
-import requests
+import httpx
 
 try:
     from config.settings import settings
@@ -26,6 +26,7 @@ class RerankerService:
         self.api_key = settings.SILICONFLOW_API_KEY
         self.base_url = settings.RERANKER_BASE_URL.rstrip("/")
         self.model = settings.RERANKER_MODEL
+        self.timeout = settings.RERANKER_TIMEOUT
         self.enabled = settings.RERANKER_ENABLED and bool(self.api_key)
 
         if settings.RERANKER_ENABLED and not self.api_key:
@@ -35,7 +36,7 @@ class RerankerService:
             f"✅ Reranker 服务初始化完成 | enabled={self.enabled} | model={self.model}"
         )
 
-    def rerank(
+    async def rerank(
         self,
         query: str,
         docs: List[Dict[str, Any]],
@@ -67,14 +68,14 @@ class RerankerService:
         }
 
         try:
-            response = requests.post(
-                f"{self.base_url}/rerank",
-                headers=headers,
-                json=payload,
-                timeout=20,
-            )
-            response.raise_for_status()
-            data = response.json()
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/rerank",
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
 
             raw_results = data.get("results", [])
             reranked = []

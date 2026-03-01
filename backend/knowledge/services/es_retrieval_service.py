@@ -4,6 +4,7 @@ ES 混合检索服务 (RAG V2.0)
 """
 
 from typing import List, Dict, Any, Optional
+import asyncio
 
 try:
     from infrastructure.es_client import ESClient
@@ -464,7 +465,7 @@ class ESRetrievalService:
         """
         try:
             # 1. 先多召回候选（为 Reranker 提供输入）
-            use_reranker = settings.RERANKER_ENABLED and bool(settings.SILICONFLOW_API_KEY)
+            use_reranker = self.reranker_service.enabled
             top_n = max(top_k, settings.RERANKER_TOP_N) if use_reranker else top_k
 
             if isinstance(query, list):
@@ -480,10 +481,12 @@ class ESRetrievalService:
 
             # 2. 可选重排序（失败或关闭时自动降级）
             if use_reranker:
-                search_results = self.reranker_service.rerank(
-                    query=rerank_query,
-                    docs=search_results,
-                    top_k=top_k,
+                search_results = asyncio.run(
+                    self.reranker_service.rerank(
+                        query=rerank_query,
+                        docs=search_results,
+                        top_k=top_k,
+                    )
                 )
             else:
                 search_results = search_results[:top_k]
