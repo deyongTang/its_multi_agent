@@ -4,7 +4,6 @@ ES 混合检索服务 (RAG V2.0)
 """
 
 from typing import List, Dict, Any, Optional
-import asyncio
 
 try:
     from infrastructure.es_client import ESClient
@@ -449,7 +448,7 @@ class ESRetrievalService:
             logger.error(f"❌ 多路 RRF 检索失败: {e}")
             raise
 
-    def retrieve(
+    async def retrieve(
         self, query: Any, top_k: int = 5, return_full_content: bool = True
     ) -> List[Dict[str, Any]]:
         """
@@ -481,12 +480,10 @@ class ESRetrievalService:
 
             # 2. 可选重排序（失败或关闭时自动降级）
             if use_reranker:
-                search_results = asyncio.run(
-                    self.reranker_service.rerank(
-                        query=rerank_query,
-                        docs=search_results,
-                        top_k=top_k,
-                    )
+                search_results = await self.reranker_service.rerank(
+                    query=rerank_query,
+                    docs=search_results,
+                    top_k=top_k,
                 )
             else:
                 search_results = search_results[:top_k]
@@ -512,6 +509,7 @@ class ESRetrievalService:
 
 if __name__ == "__main__":
     # 测试代码
+    import asyncio
     import sys
     import os
     from infrastructure.logger import logger
@@ -535,7 +533,7 @@ if __name__ == "__main__":
         print(f"{'='*60}")
 
         try:
-            results = service.retrieve(query, top_k=3)
+            results = asyncio.run(service.retrieve(query, top_k=3))
 
             if results:
                 print(f"✅ 找到 {len(results)} 个结果:\n")
