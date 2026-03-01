@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     RERANKER_BASE_URL: str = Field(default="https://api.siliconflow.cn/v1")
     RERANKER_MODEL: str = Field(default="BAAI/bge-reranker-v2-m3")
     RERANKER_TOP_N: int = Field(default=50)
+    RERANKER_TIMEOUT: int = Field(default=10)
     RERANKER_ENABLED: bool = Field(default=False)
 
     # Elasticsearch 配置
