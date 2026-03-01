@@ -14,7 +14,21 @@
 *   **流程**: `Hybrid Retrieval (Top 50)` -> `Reranker Scoring` -> `Truncate (Top 5)` -> `LLM`。
 *   **预期收益**: MRR@10 指标提升 15% 以上，显著减少 LLM 的幻觉。
 
-### 1.2 动态阈值截断 (Dynamic Thresholding)
+### 1.2 向量检索引擎升级 (Native KNN)
+*   **痛点**: 当前向量检索使用 `script_score` + `match_all`，对索引中**每一条文档**计算余弦相似度，复杂度 O(n)，数据量增大后性能严重下降。
+*   **方案**: 改用 ES 原生 `knn` 查询，底层基于 **HNSW (Hierarchical Navigable Small World)** 近似最近邻算法，复杂度 O(log n)。
+    ```json
+    "knn": {
+        "field": "content_vector",
+        "query_vector": "<query_vec>",
+        "k": 50,
+        "num_candidates": 500
+    }
+    ```
+*   **前提**: 索引 Mapping 中 `content_vector` 字段类型需改为 `dense_vector` 并开启 `index: true`。
+*   **预期收益**: 大规模数据下检索延迟降低 50% 以上，同时作为 Reranker 候选集质量的基础保障。
+
+### 1.3 动态阈值截断 (Dynamic Thresholding)
 *   **痛点**: 当前硬编码返回 Top 5。若仅有 1 条相关，会引入 4 条噪音；若有 10 条相关，会漏掉 5 条。
 *   **方案**: 实现 **Elbow Method (肘部法则)**。
     *   *算法*: 计算重排分数的导数（斜率）。当分数出现断崖式下跌（Slope > Threshold）时，立即截断结果列表。
@@ -65,6 +79,6 @@
 | 阶段 | 重点特性 | 关键技术 | 状态 |
 | :--- | :--- | :--- | :--- |
 | **V3.2 (Current)** | 工业级基座 | N+1 Storage, Atomic Write, RRF Fusion | ✅ 已上线 |
-| **V3.3** | 精度优化 | Cross-Encoder Rerank, Dynamic Threshold | 📅 待排期 |
+| **V3.3** | 精度优化 | Native KNN, Cross-Encoder Rerank, Dynamic Threshold | 📅 待排期 |
 | **V3.4** | 多模态基础 | Image ETL (MinIO), Visual Captioning | 📅 规划中 |
 | **V4.0** | 智能体化 | Smart Crawler, Agentic Retrieval | 📅 远期规划 |
