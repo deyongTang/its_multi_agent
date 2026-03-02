@@ -28,9 +28,9 @@ class Settings(BaseSettings):
     OSS_STORAGE_PATH: str = os.path.join(_project_root, "data", "oss")
     
     # MinIO Configuration
-    MINIO_ENDPOINT: str = Field(default="YOUR_SERVER_IP:9000")
-    MINIO_ACCESS_KEY: str = Field(default="its_appkey")
-    MINIO_SECRET_KEY: str = Field(default="REDACTED_SECRET")
+    MINIO_ENDPOINT: str = Field(default="")
+    MINIO_ACCESS_KEY: str = Field(default="")
+    MINIO_SECRET_KEY: str = Field(default="")
     MINIO_BUCKET: str = Field(default="knowledge-base")
     MINIO_SECURE: bool = Field(default=False)  # True for HTTPS, False for HTTP
 
@@ -59,11 +59,11 @@ class Settings(BaseSettings):
     DYNAMIC_MIN_RESULTS: int = Field(default=1)
 
     # Elasticsearch 配置
-    ES_HOST: str = Field(default="YOUR_SERVER_IP")
+    ES_HOST: str = Field(default="")
     ES_PORT: int = Field(default=9200)
     ES_SCHEME: str = Field(default="http")
     ES_USERNAME: str = Field(default="elastic")
-    ES_PASSWORD: str = Field(default="REDACTED_PASSWORD")
+    ES_PASSWORD: str = Field(default="")
     ES_INDEX_NAME: str = Field(default="")
     ES_VECTOR_DIMS: int = Field(default=1024)  # 1024 dimensions
 

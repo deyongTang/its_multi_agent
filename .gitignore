@@ -44,6 +44,8 @@ backend/knowledge/api/logs/
 .env
 .env.local
 .env.*.local
+.test-env
+*.test-env
 
 # Database
 *.db
