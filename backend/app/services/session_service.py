@@ -7,6 +7,7 @@ from infrastructure.logging.logger import logger
 # 导入 Redis 分布式锁（可选依赖）
 try:
     from infrastructure.redis_lock import redis_lock
+
     REDIS_LOCK_AVAILABLE = True
 except ImportError:
     REDIS_LOCK_AVAILABLE = False
@@ -49,7 +50,7 @@ class SessionService:
         chat_history = self.load_history(user_id, session_id)
 
         # 2. 拼接用户角色的消息(当前)
-        chat_history.append({"role": "user", "content":user_input})
+        chat_history.append({"role": "user", "content": user_input})
 
         # 3. 裁减历史会话
         truncate_history = self._truncate_history(chat_history, max_turn)
@@ -69,7 +70,7 @@ class SessionService:
 
         """
         # 1. 判读session_id是否为空
-        target_session_id = session_id if      session_id else self.DEFAULT_SESSION_ID
+        target_session_id = session_id if session_id else self.DEFAULT_SESSION_ID
 
         # 2. 加载
         try:
@@ -117,8 +118,6 @@ class SessionService:
         except Exception as e:
             logger.error(f"保存用户 {user_id} 会话 {session_id} 文件失败:{str(e)}")
             return
-
-
 
     def get_all_sessions_memory(self, user_id: str) -> List[Dict[str, Any]]:
         """获取并格式化用户的所有会话列表（用于前端侧边栏展示）。
@@ -173,8 +172,6 @@ class SessionService:
 
             formatted_sessions.append(session_item)
 
-
-
         # 4. 排序：按时间倒序（最新的在最前）
         formatted_sessions.sort(
             key=lambda x: x.get("create_time") or "",
@@ -211,7 +208,7 @@ class SessionService:
         self._repo.save_session(user_id, session_id, chat_history)
         logger.debug(f"会话已保存，最新 seq_id: {next_seq_id - 1}")
 
-    def _init_system_msg_instruct(self, session_id) -> List[Dict[str, Any]]:
+    def _init_system_msg_instruct(self, session_id: str) -> List[Dict[str, Any]]:
         """
          初始化一个带系统角色的消息结构
         Args:
@@ -252,11 +249,6 @@ class SessionService:
 
         # 5. 返回指定轮数的消息
         return final_msg
-
-
-
-
-
 
 
 # 全局单例

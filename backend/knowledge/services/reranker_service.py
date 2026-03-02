@@ -22,12 +22,12 @@ except ModuleNotFoundError:
 class RerankerService:
     """Cross-Encoder 重排服务（API 方式）"""
 
-    def __init__(self):
-        self.api_key = settings.SILICONFLOW_API_KEY
-        self.base_url = settings.RERANKER_BASE_URL.rstrip("/")
-        self.model = settings.RERANKER_MODEL
-        self.timeout = settings.RERANKER_TIMEOUT
-        self.enabled = settings.RERANKER_ENABLED and bool(self.api_key)
+    def __init__(self) -> None:
+        self.api_key: str = settings.SILICONFLOW_API_KEY
+        self.base_url: str = settings.RERANKER_BASE_URL.rstrip("/")
+        self.model: str = settings.RERANKER_MODEL
+        self.timeout: int = settings.RERANKER_TIMEOUT
+        self.enabled: bool = settings.RERANKER_ENABLED and bool(self.api_key)
 
         if settings.RERANKER_ENABLED and not self.api_key:
             logger.warning("⚠️ RERANKER_ENABLED=True 但未配置 SILICONFLOW_API_KEY，自动降级为 RRF")

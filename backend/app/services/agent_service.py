@@ -11,6 +11,7 @@ from schemas.response import ContentKind
 import traceback
 
 
+@DeprecationWarning
 class MultiAgentService:
     """
     多智能体业务服务类 (V1: 基于 Orchestrator Agent)

@@ -171,9 +171,13 @@ Authorization: Bearer {SILICONFLOW_API_KEY}
     ▼
 [Cross-Encoder Reranker]   (query, chunk) 对语义精排  ← V3.3 新增
     │                      服务商：硅基流动 bge-reranker-v2-m3
-    │                      输出：Top-5，附 rerank_score
+    │                      输出：Top-K，附 rerank_score（0~1）
     ▼
-[Get Parent Documents]     mget 批量取父文档完整内容（仅 Top-5）
+[Dynamic Thresholding]     Elbow Method 动态截断      ← V3.3 配套必做
+    │                      检测 rerank_score 断崖（相邻跌幅 > 0.3）
+    │                      输出：1~top_k 条（按实际相关性决定，非硬编码）
+    ▼
+[Get Parent Documents]     mget 批量取父文档完整内容（仅取实际截断后条数）
     │
     ▼
 [LLM Generation]           流式输出最终答案

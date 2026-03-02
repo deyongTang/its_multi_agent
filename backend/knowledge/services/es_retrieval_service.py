@@ -36,13 +36,13 @@ class ESRetrievalService:
     3. 父子文档：检索用 Chunk，展示用 Parent
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化检索服务"""
-        self.es_client = ESClient()
-        self.embedding_service = EmbeddingService()
-        self.reranker_service = RerankerService()
-        self.text_processor = TextProcessor()
-        self.index_name = settings.ES_INDEX_NAME
+        self.es_client: ESClient = ESClient()
+        self.embedding_service: EmbeddingService = EmbeddingService()
+        self.reranker_service: RerankerService = RerankerService()
+        self.text_processor: TextProcessor = TextProcessor()
+        self.index_name: str = settings.ES_INDEX_NAME
         logger.info(f"✅ ES 混合检索服务初始化成功，索引: {self.index_name}")
 
     def hybrid_search(
@@ -294,6 +294,47 @@ class ESRetrievalService:
             return self.embedding_service.embed_query(query)
         return self.embedding_service.embed_text(query)
 
+    def _dynamic_truncate(
+        self, reranked_results: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        基于 Elbow Method 的动态截断（断崖检测）
+
+        规则：
+        1. 仅在结果包含 rerank_score 时执行
+        2. 按相邻分数相对降幅检测“断崖”
+        3. 保底返回 DYNAMIC_MIN_RESULTS 条
+        """
+        if not reranked_results:
+            return []
+
+        if "rerank_score" not in reranked_results[0]:
+            logger.warning("⚠️ 动态截断跳过：缺少 rerank_score")
+            return reranked_results
+
+        scores: List[float] = [float(item.get("rerank_score", 0.0)) for item in reranked_results]
+        drop_threshold: float = max(settings.DYNAMIC_DROP_THRESHOLD, 0.0)
+        min_results: int = max(settings.DYNAMIC_MIN_RESULTS, 1)
+
+        keep_count: int = len(scores)
+        eps: float = 1e-8
+
+        # 从第 2 个分数开始检测相邻降幅，检测到“断崖”后在断点前截断
+        for i in range(1, len(scores)):
+            prev_score = scores[i - 1]
+            curr_score = scores[i]
+            relative_drop = (prev_score - curr_score) / max(abs(prev_score), eps)
+            if relative_drop >= drop_threshold:
+                keep_count = i
+                break
+
+        keep_count = max(min_results, min(keep_count, len(reranked_results)))
+        truncated = reranked_results[:keep_count]
+        logger.info(
+            f"✅ 动态截断完成 | 输入={len(reranked_results)} | 输出={len(truncated)} | 阈值={drop_threshold}"
+        )
+        return truncated
+
     def _rrf_fusion(
         self,
         ranking_lists: List[List[Dict[str, Any]]],
@@ -485,6 +526,8 @@ class ESRetrievalService:
                     docs=search_results,
                     top_k=top_k,
                 )
+                if settings.DYNAMIC_THRESHOLD_ENABLED:
+                    search_results = self._dynamic_truncate(search_results)
             else:
                 search_results = search_results[:top_k]
 

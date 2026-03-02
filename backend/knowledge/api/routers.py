@@ -1,6 +1,8 @@
 import os.path
 import sys
 from pathlib import Path
+from datetime import datetime
+from typing import Any, AsyncGenerator, Dict, Optional
 
 # 添加项目根目录到 Python 路径
 project_root = Path(__file__).parent.parent
@@ -9,6 +11,7 @@ sys.path.insert(0, str(project_root))
 import aiofiles
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from infrastructure.auth_dependencies import get_current_user
 
 from services.ingestion.ingestion_processor import IngestionProcessor
@@ -24,7 +27,6 @@ from services.es_retrieval_service import ESRetrievalService
 from business_logic.document_sync_service import DocumentSyncService
 from business_logic.crawler_service import CrawlerService
 from business_logic.ingestion_worker_service import IngestionWorkerService
-from datetime import datetime
 
 # 使用新的日志系统
 from infrastructure.logger import logger
@@ -38,7 +40,7 @@ router = APIRouter()
 
 # --- 任务调度接口 (Task Endpoints) ---
 
-def _run_crawl_task(start_id: int, end_id: int):
+def _run_crawl_task(start_id: int, end_id: int) -> None:
     """
     [后台任务] 执行爬虫任务
     Pipeline 1: Crawler -> OSS
@@ -54,7 +56,7 @@ async def trigger_crawl_task(
     background_tasks: BackgroundTasks,
     start_id: int = 1,
     end_id: int = 100
-):
+) -> Dict[str, Any]:
     """
     启动后台爬虫任务 (Pipeline 1: Crawler -> OSS)
     
@@ -70,7 +72,7 @@ async def trigger_crawl_task(
         "task_type": "crawler"
     }
 
-def _run_ingestion_task(batch_size: int, retry: bool):
+def _run_ingestion_task(batch_size: int, retry: bool) -> None:
     """
     [后台任务] 执行入库任务
     Pipeline 2: MinIO -> ES
@@ -93,7 +95,7 @@ async def trigger_ingest_task(
     background_tasks: BackgroundTasks,
     batch_size: int = 100,
     retry: bool = False
-):
+) -> Dict[str, Any]:
     """
     启动后台入库任务 (Pipeline 2: MinIO -> ES)
     
@@ -113,7 +115,7 @@ async def trigger_ingest_task(
 async def test_upload_to_oss(
     file: UploadFile = File(...),
     knowledge_no: str = "test-001"
-):
+) -> Dict[str, Any]:
     """
     测试接口：上传文件到 MinIO 并注册到数据库 (状态: NEW)
     用于验证 'Crawler -> OSS' 链路
@@ -145,42 +147,42 @@ async def test_upload_to_oss(
 
 
 # 2. 延迟初始化服务实例（避免在导入时创建，此时环境变量可能未设置）
-_ingestion_processor = None
-_retrieval_service = None
-_query_service = None
-_es_ingestion_processor = None
-_es_retrieval_service = None
+_ingestion_processor: Optional[IngestionProcessor] = None
+_retrieval_service: Optional[RetrievalService] = None
+_query_service: Optional[QueryService] = None
+_es_ingestion_processor: Optional[ESIngestionProcessor] = None
+_es_retrieval_service: Optional[ESRetrievalService] = None
 
 
-def get_ingestion_processor():
+def get_ingestion_processor() -> IngestionProcessor:
     global _ingestion_processor
     if _ingestion_processor is None:
         _ingestion_processor = IngestionProcessor()
     return _ingestion_processor
 
 
-def get_retrieval_service():
+def get_retrieval_service() -> RetrievalService:
     global _retrieval_service
     if _retrieval_service is None:
         _retrieval_service = RetrievalService()
     return _retrieval_service
 
 
-def get_query_service():
+def get_query_service() -> QueryService:
     global _query_service
     if _query_service is None:
         _query_service = QueryService()
     return _query_service
 
 
-def get_es_ingestion_processor():
+def get_es_ingestion_processor() -> ESIngestionProcessor:
     global _es_ingestion_processor
     if _es_ingestion_processor is None:
         _es_ingestion_processor = ESIngestionProcessor()
     return _es_ingestion_processor
 
 
-def get_es_retrieval_service():
+def get_es_retrieval_service() -> ESRetrievalService:
     global _es_retrieval_service
     if _es_retrieval_service is None:
         _es_retrieval_service = ESRetrievalService()
@@ -191,8 +193,8 @@ def get_es_retrieval_service():
 @router.post("/upload", response_model=UploadResponse, summary="处理知识库上传")
 async def upload_file(
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
-):
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> UploadResponse:
     # "0430-联想手机K900常见问题汇总.md"
     temp_file_path = ""
 
@@ -242,8 +244,8 @@ async def upload_file(
 @router.post("/upload_es", response_model=UploadResponse, summary="上传文档到 Elasticsearch")
 async def upload_file_to_es(
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
-):
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> UploadResponse:
     """
     上传文档到 Elasticsearch（N+1 存储模式）
     - N 个切片用于搜索（带向量）
@@ -304,8 +306,8 @@ async def upload_file_to_es(
 @router.post("/retrieve", response_model=RetrieveResponse, summary="纯检索接口（不经过 LLM 生成）")
 async def retrieve_chunks(
     request: RetrieveRequest,
-    current_user: dict = Depends(get_current_user)
-):
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> RetrieveResponse:
     """
     纯检索接口：只返回原始 chunks，不调用 LLM 生成答案。
     供 app 层的 node_generate_report 统一生成最终回答，消除双重 LLM 问题。
@@ -341,8 +343,8 @@ async def retrieve_chunks(
 @router.post("/query_sync", response_model=QuerySyncResponse, summary="查询知识库（非流式，供 app 层调用）")
 async def query_knowledge_sync(
     request: QueryRequest,
-    current_user: dict = Depends(get_current_user)
-):
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> QuerySyncResponse:
     """非流式查询知识库，返回 JSON 格式的完整 RAG 答案"""
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
@@ -387,8 +389,8 @@ async def query_knowledge_sync(
 @router.post("/query", summary="查询知识库（流式输出）")
 async def query_knowledge(
     request: QueryRequest,
-    current_user: dict = Depends(get_current_user)
-):
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> StreamingResponse:
     """
     流式查询知识库接口
     返回 Server-Sent Events (SSE) 格式的流式响应
@@ -396,7 +398,7 @@ async def query_knowledge(
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
 
-    async def generate_stream():
+    async def generate_stream() -> AsyncGenerator[str, None]:
         """生成流式响应的异步生成器"""
         try:
             logger.info(f"🔎 原始问题: {request.question}")
@@ -482,11 +484,10 @@ async def query_knowledge(
             logger.error(f"❌ 查询出错: {e}")
             yield f"data: [ERROR] {str(e)}\n\n"
 
-    from fastapi.responses import StreamingResponse
     return StreamingResponse(generate_stream(), media_type="text/event-stream")
 
 @router.get("/es", summary="测试 ES 连接")
-def testEs():
+def testEs() -> Dict[str, Any]:
     """测试 Elasticsearch 连接和查询功能"""
     try:
         es_client = ESClient()

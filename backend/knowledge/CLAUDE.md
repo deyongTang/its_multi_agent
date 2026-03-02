@@ -34,6 +34,43 @@
    - 同一类型的外部服务（LLM、Embedding、Rerank）优先复用同一供应商的 SDK
    - 当前供应商：阿里百炼（LLM + Embedding）、硅基流动（Rerank）
 
+6. **代码可读性：强制类型注解**
+   - 这是企业级项目，代码必须让人看得懂，不允许裸写无类型的变量和函数
+   - **所有函数必须有完整的参数类型注解和返回值注解**：
+     ```python
+     # ❌ 禁止：IDE 无法推断类型，阅读者看不出意图
+     def retrieve(self, query, top_k=5):
+         ...
+
+     # ✅ 正确：类型清晰，IDE 可跳转，阅读者一目了然
+     def retrieve(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+         ...
+     ```
+   - **函数返回值必须注解**，是推断调用链类型的基础：
+     ```python
+     # ❌ 禁止：IDE 不知道返回什么类型
+     def get_es_retrieval_service():
+         return ESRetrievalService(...)
+
+     # ✅ 正确：调用方可自动推断类型，无需手动标注变量
+     def get_es_retrieval_service() -> ESRetrievalService:
+         return ESRetrievalService(...)
+     ```
+   - **类属性必须在 `__init__` 中声明类型**：
+     ```python
+     # ✅ 正确
+     class RerankerService:
+         api_key: str
+         model: str
+         enabled: bool
+
+         def __init__(self) -> None:
+             self.api_key: str = settings.SILICONFLOW_API_KEY
+             self.model: str = settings.RERANKER_MODEL
+             self.enabled: bool = settings.RERANKER_ENABLED
+     ```
+   - 复杂类型使用 `from typing import List, Dict, Any, Optional, Tuple`
+
 ---
 
 ## 技术栈约定

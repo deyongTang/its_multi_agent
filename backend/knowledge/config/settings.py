@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     RERANKER_TOP_N: int = Field(default=50)
     RERANKER_TIMEOUT: int = Field(default=10)
     RERANKER_ENABLED: bool = Field(default=False)
+    DYNAMIC_THRESHOLD_ENABLED: bool = Field(default=False)
+    DYNAMIC_DROP_THRESHOLD: float = Field(default=0.3)
+    DYNAMIC_MIN_RESULTS: int = Field(default=1)
 
     # Elasticsearch 配置
     ES_HOST: str = Field(default="YOUR_SERVER_IP")
