@@ -2,7 +2,7 @@
 
 > **文档定位**: 本文档定义了 ITS 知识库系统的**工业级架构规范**。
 > **核心目标**: 建立**可商用**的知识检索服务，确保**业务数据闭环**、**流程可控**与**数据强一致性**。
-> **代码版本**: v3.2
+> **代码版本**: v3.3
 
 ---
 
@@ -46,10 +46,11 @@ graph TD
         ES_Tx -->|5. Commit| MetaDB_Commit[Update: INGESTED]
     end
 
-    subgraph "Retrieval Layer (服务层 - 混合计算)"
-        User -->|Query| Hybrid[Hybrid Search]
-        Hybrid -->|RRF Fusion| Rank[RRF 排序]
-        Rank -->|Collapse| Result[聚合知识点]
+    subgraph "Retrieval Layer (服务层 - 混合精排)"
+        User -->|Query| Hybrid[Hybrid Search: BM25 + Native KNN]
+        Hybrid -->|RRF Fusion| Rank[RRF 粗排 Top-N]
+        Rank -->|Top 50 candidates| Reranker[Cross-Encoder Reranker]
+        Reranker -->|Top-K 精排| Result[聚合知识点]
     end
 ```
 
@@ -77,34 +78,106 @@ graph TD
 
 ---
 
-## 4. 混合检索与 RRF 融合 (Hybrid Search & RRF)
+## 4. 混合检索、RRF 融合与 Cross-Encoder 精排 (Hybrid Search + RRF + Reranking)
 
-这是业务价值兑现的核心层。我们不依赖 ES 默认评分，而是通过**自定义算法**掌握排序主权。
+这是业务价值兑现的核心层。V3.3 完成了三步精度升级，实现了**召回 → 粗排 → 精排**的完整漏斗。
 
-### 4.1 混合检索 DSL (Controlled DSL)
-通过精细构造的 Boolean Query，同时捕获**字面匹配**与**语义相关性**：
+### 4.1 混合检索：BM25 + Native KNN (V3.3 升级)
+
+**向量检索**从 `script_score` 全量扫描（O(n)）升级为 ES 原生 `knn` 查询（HNSW 图索引，O(log n)）：
 
 ```json
+// 路1: BM25 关键词检索（分别执行）
 {
   "query": {
     "bool": {
       "filter": [{"term": {"doc_type": "chunk"}}],
-      "should": [
-        // 路1: 业务关键词匹配 (BM25) - 权重可运营配置
-        { "multi_match": { "query": "...", "boost": 0.5 } },
-        // 路2: 向量语义匹配 (Cosine) - 权重可运营配置
-        { "script_score": { "script": "cosineSimilarity...", "boost": 0.5 } }
-      ]
+      "must": [{ "multi_match": { "query": "...", "fields": ["title^2", "content"] } }]
     }
+  }
+}
+
+// 路2: Native KNN 语义检索（分别执行，V3.3 升级）
+{
+  "knn": {
+    "field": "content_vector",
+    "query_vector": [...],
+    "k": 50,
+    "num_candidates": 500,
+    "filter": {"term": {"doc_type": "chunk"}}
   },
-  "collapse": {"field": "knowledge_no"} // 强制按知识点聚合，保证结果多样性
+  "size": 50
 }
 ```
+
+> ⚠️ **已废弃**：旧版 `script_score + match_all` 方案（O(n) 全量扫描）不再使用。
+> 当前 `hybrid_search()` 方法已标注 `DEPRECATED`，主路径为 `rrf_search()`。
 
 ### 4.2 客户端 RRF 融合 (Client-Side RRF)
 我们在应用层实现 **Reciprocal Rank Fusion**，确保无论模型如何升级、ES 版本如何变更，排序逻辑始终**稳定可控**。
 
 $$ Score(d) = \sum_{rank \in Ranks} \frac{1}{k + rank} $$
+
+- **k = 60**（学术界和工业界验证过的通用值）
+- 两路并行检索后，各取 Top-50，在 Python 层合并计算 RRF 分数，输出 **Top-N 候选集（默认 50）**
+
+### 4.3 Cross-Encoder 精排 (Reranking — V3.3 新增)
+
+RRF 是基于排名的统计融合，无法理解 Query 与 Document 之间的细粒度语义关联。精排层解决的正是这个问题。
+
+**位置**：插入在 RRF 融合之后、获取父文档之前：
+
+```
+RRF Top-50 候选 → Cross-Encoder 精排 → Top-5 → 获取父文档完整内容 → LLM
+```
+
+**服务商**：硅基流动 `BAAI/bge-reranker-v2-m3` API
+
+> ⚠️ **生产环境禁止本地加载 Reranker 模型**
+> PyTorch 推理是 CPU 密集型同步操作。Docker 容器无 GPU 时，并发请求会导致
+> CPU 100% → 队列积压 → 响应超时 → 服务崩溃。生产环境必须使用 API。
+
+```http
+POST https://api.siliconflow.cn/v1/rerank
+Authorization: Bearer {SILICONFLOW_API_KEY}
+
+{
+    "model": "BAAI/bge-reranker-v2-m3",
+    "query": "用户问题",
+    "documents": ["chunk_content_1", "chunk_content_2", ...],
+    "top_n": 5,
+    "return_documents": false
+}
+```
+
+**降级策略**：`RERANKER_ENABLED=false` 时，系统自动退化为 RRF 直接截断，不影响任何现有功能。
+
+### 4.4 完整检索流水线 (V3.3 End-to-End Retrieval Pipeline)
+
+```
+用户问题
+    │
+    ▼
+[Query Rewriting]          LLM 改写，生成原始 + 改写版本
+    │
+    ▼
+[multi_query_rrf_search]   双路并行检索
+    ├── BM25 检索  × 2     (原始 + 改写查询)
+    └── Native KNN × 2     (原始 + 改写查询，HNSW O(log n))
+    │
+    ▼
+[RRF Fusion]               倒数排名融合，k=60
+    │                      输出：Top-50 候选 chunk
+    ▼
+[Cross-Encoder Reranker]   (query, chunk) 对语义精排  ← V3.3 新增
+    │                      服务商：硅基流动 bge-reranker-v2-m3
+    │                      输出：Top-5，附 rerank_score
+    ▼
+[Get Parent Documents]     mget 批量取父文档完整内容（仅 Top-5）
+    │
+    ▼
+[LLM Generation]           流式输出最终答案
+```
 
 ---
 
@@ -124,13 +197,17 @@ $$ Score(d) = \sum_{rank \in Ranks} \frac{1}{k + rank} $$
 
 ## 6. 性能基准 (Performance Baseline)
 
-| 指标 | 目标值 | 现状 | 说明 |
+| 指标 | V3.2 基线 | V3.3 目标 | 说明 |
 | :--- | :--- | :--- | :--- |
 | **数据一致性** | 100% | 100% | 基于 SHA256 与事务写入保障 |
-| **入库成功率** | > 99.9% | 99.9% | 依赖死信队列重试机制 |
-| **检索 P95 延迟** | < 200ms | 150ms | 100万级数据量测 |
+| **入库成功率** | 99.9% | 99.9% | 依赖死信队列重试机制 |
+| **向量检索延迟 (P95)** | ~50ms (O(n) script_score) | ~5ms (O(log n) KNN) | 万级文档量测；十万级差距更显著 |
+| **检索总链路 P95** | 150ms | < 350ms | 含 Reranker API 调用（50~200ms） |
+| **检索精度 MRR@10** | 基线 | 预计 +15% | Cross-Encoder 精排效果（行业数据） |
+| **RERANKER_ENABLED=false 降级延迟** | — | 150ms | 与 V3.2 完全一致，零风险 |
 
 ---
 
-> **总结**: 
-> 本系统严格遵循工业级标准构建。通过**数据闭环管理**、**事务性写入**和**可控的检索算法**，我们交付的不仅仅是一个功能模块，而是一个**可信赖、可审计、可商用**的知识资产管理平台。
+> **总结**:
+> 本系统严格遵循工业级标准构建。V3.3 完成检索精度突破：向量检索从 O(n) 暴力扫描升级为 O(log n) HNSW 索引，新增 Cross-Encoder 精排层（硅基流动 API），检索漏斗从"召回→粗排"扩展为"召回→粗排→精排"三级架构。
+> 通过**数据闭环管理**、**事务性写入**、**可控的检索算法**和 **Feature Flag 降级策略**，我们交付的不仅仅是一个功能模块，而是一个**可信赖、可审计、可商用、可降级**的知识资产管理平台。
