@@ -1,4 +1,4 @@
-API_KEY=REDACTED_API_KEY
+API_KEY=your_api_key_here
 BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 MODEL=qwen2.5-32b-instruct
 EMBEDDING_MODEL=text-embedding-v3
@@ -8,21 +8,21 @@ KNOWLEDGE_BASE_URL=https://iknow.lenovo.com.cn
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=root
-DB_PASSWORD=REDACTED_PASSWORD
+DB_PASSWORD=your_password_here
 DB_NAME=its_knowledge
 
 # Elasticsearch 配置
-ES_HOST=10.206.0.15
+ES_HOST=your_es_host_here
 ES_PORT=9200
 ES_SCHEME=http
 ES_USERNAME=elastic
-ES_PASSWORD=REDACTED_PASSWORD
+ES_PASSWORD=your_es_password_here
 ES_INDEX_NAME=its_knowledge_index
 ES_VECTOR_DIMS=1024
 
 # minio 对象存储配置
-MINIO_ENDPOINT=10.206.0.15:9000
-MINIO_ACCESS_KEY=its_appkey
-MINIO_SECRET_KEY=REDACTED_SECRET
+MINIO_ENDPOINT=your_minio_host_here:9000
+MINIO_ACCESS_KEY=your_minio_access_key_here
+MINIO_SECRET_KEY=your_minio_secret_key_here
 MINIO_BUCKET=knowledge-base
 MINIO_SECURE=false

@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 try:
     from infrastructure.es_client import ESClient
     from services.embedding_service import EmbeddingService
+    from services.reranker_service import RerankerService
     from services.text_processor import TextProcessor
     from config.settings import settings
     from infrastructure.logger import logger
@@ -19,6 +20,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, project_root)
     from infrastructure.es_client import ESClient
     from services.embedding_service import EmbeddingService
+    from services.reranker_service import RerankerService
     from services.text_processor import TextProcessor
     from config.settings import settings
     from infrastructure.logger import logger
@@ -38,6 +40,7 @@ class ESRetrievalService:
         """初始化检索服务"""
         self.es_client = ESClient()
         self.embedding_service = EmbeddingService()
+        self.reranker_service = RerankerService()
         self.text_processor = TextProcessor()
         self.index_name = settings.ES_INDEX_NAME
         logger.info(f"✅ ES 混合检索服务初始化成功，索引: {self.index_name}")
@@ -50,6 +53,8 @@ class ESRetrievalService:
         vector_weight: float = 0.5,
     ) -> List[Dict[str, Any]]:
         """
+        DEPRECATED: 请改用 rrf_search() 或 retrieve()
+
         混合检索：BM25 + 向量检索 + Collapse 折叠
 
         Args:
@@ -61,6 +66,9 @@ class ESRetrievalService:
         Returns:
             List[Dict]: 检索结果列表，每个元素包含 knowledge_no 和 score
         """
+        logger.warning(
+            "⚠️ hybrid_search() 已废弃（deprecated），请改用 rrf_search() / retrieve() 进行两路独立检索后 RRF 融合"
+        )
         try:
             # 1. 预处理查询
             query_segmented = self.text_processor.segment_chinese(query)
@@ -119,6 +127,14 @@ class ESRetrievalService:
         """
         dsl = {
             "size": top_k * 3,  # 折叠前多召回一些
+            "knn": {
+                "field": "content_vector",
+                "query_vector": query_vector,
+                "k": top_k * 3,
+                "num_candidates": max(top_k * 30, 50),
+                "filter": {"term": {"doc_type": "chunk"}},
+                "boost": vector_weight,
+            },
             "query": {
                 "bool": {
                     "filter": [{"term": {"doc_type": "chunk"}}],  # 只检索 chunk
@@ -129,18 +145,7 @@ class ESRetrievalService:
                                 "query": query_segmented,
                                 "fields": ["title^2", "content"],  # title 权重 2 倍
                                 "type": "best_fields",
-                                "boost": keyword_weight,
-                            }
-                        },
-                        # 路径 2: KNN 向量检索
-                        {
-                            "script_score": {
-                                "query": {"match_all": {}},
-                                "script": {
-                                    "source": "cosineSimilarity(params.query_vector, 'content_vector') + 1.0",
-                                    "params": {"query_vector": query_vector},
-                                },
-                                "boost": vector_weight,
+                                "boost": keyword_weight
                             }
                         },
                     ],
@@ -267,28 +272,27 @@ class ESRetrievalService:
             List[Dict]: 检索结果
         """
         dsl = {
-            "size": top_k,
-            "query": {
-                "bool": {
-                    "filter": [{"term": {"doc_type": "chunk"}}],
-                    "must": [
-                        {
-                            "script_score": {
-                                "query": {"match_all": {}},
-                                "script": {
-                                    "source": "cosineSimilarity(params.query_vector, 'content_vector') + 1.0",
-                                    "params": {"query_vector": query_vector},
-                                },
-                            }
-                        }
-                    ],
-                }
+            "knn": {
+                "field": "content_vector",
+                "query_vector": query_vector,
+                "k": top_k,
+                "num_candidates": max(top_k * 10, 50),
+                "filter": {"term": {"doc_type": "chunk"}},
             },
+            "size": top_k,
             "_source": ["doc_id", "knowledge_no", "title", "content", "chunk_index"],
         }
 
         response = self.es_client.search(self.index_name, dsl)
         return self._parse_search_results(response)
+
+    def _embed_query(self, query: str) -> List[float]:
+        """
+        兼容不同向量服务接口：优先 embed_query，回退到 embed_text
+        """
+        if hasattr(self.embedding_service, "embed_query"):
+            return self.embedding_service.embed_query(query)
+        return self.embedding_service.embed_text(query)
 
     def _rrf_fusion(
         self,
@@ -363,7 +367,7 @@ class ESRetrievalService:
         try:
             # 1. 预处理查询
             query_segmented = self.text_processor.segment_chinese(query)
-            query_vector = self.embedding_service.embed_query(query)
+            query_vector = self._embed_query(query)
 
             logger.info(f"🔍 开始 RRF 混合检索: {query}")
 
@@ -418,7 +422,7 @@ class ESRetrievalService:
                 
                 # 预处理
                 query_segmented = self.text_processor.segment_chinese(q)
-                query_vector = self.embedding_service.embed_query(q)
+                query_vector = self._embed_query(q)
                 
                 # 分别召回
                 kw_res = self._keyword_search(query_segmented, top_k=top_k * 3)
@@ -444,7 +448,7 @@ class ESRetrievalService:
             logger.error(f"❌ 多路 RRF 检索失败: {e}")
             raise
 
-    def retrieve(
+    async def retrieve(
         self, query: Any, top_k: int = 5, return_full_content: bool = True
     ) -> List[Dict[str, Any]]:
         """
@@ -459,24 +463,39 @@ class ESRetrievalService:
             List[Dict]: 检索结果
         """
         try:
-            # 1. 确定检索方案
+            # 1. 先多召回候选（为 Reranker 提供输入）
+            use_reranker = self.reranker_service.enabled
+            top_n = max(top_k, settings.RERANKER_TOP_N) if use_reranker else top_k
+
             if isinstance(query, list):
-                search_results = self.multi_query_rrf_search(query, top_k=top_k)
+                search_results = self.multi_query_rrf_search(query, top_k=top_n)
+                rerank_query = query[0] if query else ""
             else:
-                search_results = self.rrf_search(query, top_k=top_k)
+                search_results = self.rrf_search(query, top_k=top_n)
+                rerank_query = query
 
             if not search_results:
                 logger.warning("⚠️ 未找到匹配的文档")
                 return []
 
-            # 2. 提取 knowledge_no
+            # 2. 可选重排序（失败或关闭时自动降级）
+            if use_reranker:
+                search_results = await self.reranker_service.rerank(
+                    query=rerank_query,
+                    docs=search_results,
+                    top_k=top_k,
+                )
+            else:
+                search_results = search_results[:top_k]
+
+            # 3. 提取 knowledge_no
             knowledge_nos = [r["knowledge_no"] for r in search_results]
 
-            # 3. 获取父文档
+            # 4. 获取父文档
             if return_full_content:
                 parent_docs = self.get_parent_documents(knowledge_nos)
 
-                # 4. 合并结果
+                # 5. 合并结果
                 for result in search_results:
                     kno = result["knowledge_no"]
                     result["full_content"] = parent_docs.get(kno, "")
@@ -490,6 +509,7 @@ class ESRetrievalService:
 
 if __name__ == "__main__":
     # 测试代码
+    import asyncio
     import sys
     import os
     from infrastructure.logger import logger
@@ -513,7 +533,7 @@ if __name__ == "__main__":
         print(f"{'='*60}")
 
         try:
-            results = service.retrieve(query, top_k=3)
+            results = asyncio.run(service.retrieve(query, top_k=3))
 
             if results:
                 print(f"✅ 找到 {len(results)} 个结果:\n")
