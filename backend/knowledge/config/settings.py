@@ -28,9 +28,9 @@ class Settings(BaseSettings):
     OSS_STORAGE_PATH: str = os.path.join(_project_root, "data", "oss")
     
     # MinIO Configuration
-    MINIO_ENDPOINT: str = Field(default="118.195.198.38:9000")
-    MINIO_ACCESS_KEY: str = Field(default="its_appkey")
-    MINIO_SECRET_KEY: str = Field(default="its_secret123")
+    MINIO_ENDPOINT: str = Field(default="")
+    MINIO_ACCESS_KEY: str = Field(default="")
+    MINIO_SECRET_KEY: str = Field(default="")
     MINIO_BUCKET: str = Field(default="knowledge-base")
     MINIO_SECURE: bool = Field(default=False)  # True for HTTPS, False for HTTP
 
@@ -56,11 +56,11 @@ class Settings(BaseSettings):
     RERANKER_ENABLED: bool = Field(default=False)
 
     # Elasticsearch 配置
-    ES_HOST: str = Field(default="118.195.198.38")
+    ES_HOST: str = Field(default="")
     ES_PORT: int = Field(default=9200)
     ES_SCHEME: str = Field(default="http")
     ES_USERNAME: str = Field(default="elastic")
-    ES_PASSWORD: str = Field(default="RrnmPnSkNFm0AiNmJiIp")
+    ES_PASSWORD: str = Field(default="")
     ES_INDEX_NAME: str = Field(default="")
     ES_VECTOR_DIMS: int = Field(default=1024)  # 1024 dimensions
 

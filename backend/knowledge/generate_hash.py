@@ -29,7 +29,7 @@ def generate_hash(password: str) -> str:
     return pwd_context.hash(password_bytes)
 
 if __name__ == "__main__":
-    password = "tang@4896"
+    password = "your_password_here"
 
     print("=" * 60)
     print("生成密码哈希值")
