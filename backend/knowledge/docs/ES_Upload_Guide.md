@@ -73,7 +73,7 @@ print(response.json())
 
 ```python
 # Elasticsearch 配置
-ES_HOST = "YOUR_SERVER_IP"
+ES_HOST = "your_es_host_here"
 ES_PORT = 9200
 ES_SCHEME = "http"
 ES_USERNAME = "elastic"

@@ -32,7 +32,7 @@ def fix_password():
         SET hashed_password = %s
         WHERE username = %s
         """
-        cursor.execute(sql, (correct_hash, 'deyong'))
+        cursor.execute(sql, (correct_hash, 'your_username'))
         conn.commit()
 
         print("\n✅ 密码已更新")
@@ -43,7 +43,7 @@ def fix_password():
                    LEFT(hashed_password, 20) as hash_preview
             FROM users
             WHERE username = %s
-        """, ('deyong',))
+        """, ('your_username',))
 
         result = cursor.fetchone()
         if result:
@@ -57,8 +57,8 @@ def fix_password():
             if result[3] == 60:
                 print("\n✅ 密码修复成功！")
                 print("\n现在可以使用以下信息登录:")
-                print(f"  用户名: deyong")
-                print(f"  密码: REDACTED_PASSWORD")
+                print(f"  用户名: your_username")
+                print(f"  密码: your_password")
             else:
                 print("\n❌ 密码长度不正确，可能需要检查数据库字段长度")
         else:

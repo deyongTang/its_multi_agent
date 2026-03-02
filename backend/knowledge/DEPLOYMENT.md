@@ -249,16 +249,16 @@ DB_PASSWORD=your-secure-password
 DB_NAME=its_knowledge
 
 # Elasticsearch 配置（必填）
-ES_HOST=YOUR_SERVER_IP
+ES_HOST=your_server_ip_here
 ES_PORT=9200
 ES_USERNAME=elastic
 ES_PASSWORD=your-es-password
 ES_INDEX_NAME=knowledge_index
 
 # MinIO 配置（必填）
-MINIO_ENDPOINT=YOUR_SERVER_IP:9000
+MINIO_ENDPOINT=your_server_ip_here:9000
 MINIO_ACCESS_KEY=its_appkey
-MINIO_SECRET_KEY=REDACTED_SECRET
+MINIO_SECRET_KEY=your_minio_secret_key_here
 MINIO_BUCKET=knowledge-base
 ```
 
@@ -343,7 +343,7 @@ curl -X POST "http://localhost:8001/query" \
 
 | 变量名 | 说明 | 示例值 | 必填 |
 |--------|------|--------|------|
-| `ES_HOST` | ES 主机地址 | `YOUR_SERVER_IP` | ✅ |
+| `ES_HOST` | ES 主机地址 | `your_server_ip_here` | ✅ |
 | `ES_PORT` | ES 端口 | `9200` | ✅ |
 | `ES_USERNAME` | ES 用户名 | `elastic` | ✅ |
 | `ES_PASSWORD` | ES 密码 | `password` | ✅ |
@@ -353,9 +353,9 @@ curl -X POST "http://localhost:8001/query" \
 
 | 变量名 | 说明 | 示例值 | 必填 |
 |--------|------|--------|------|
-| `MINIO_ENDPOINT` | MinIO 地址 | `YOUR_SERVER_IP:9000` | ✅ |
+| `MINIO_ENDPOINT` | MinIO 地址 | `your_server_ip_here:9000` | ✅ |
 | `MINIO_ACCESS_KEY` | 访问密钥 | `its_appkey` | ✅ |
-| `MINIO_SECRET_KEY` | 密钥 | `REDACTED_SECRET` | ✅ |
+| `MINIO_SECRET_KEY` | 密钥 | `your_minio_secret_key_here` | ✅ |
 | `MINIO_BUCKET` | 存储桶名称 | `knowledge-base` | ✅ |
 
 #### RAG 配置
@@ -426,7 +426,7 @@ cat .env | grep API_KEY
 
 ```bash
 # 测试 ES 连接
-curl -u elastic:your_password http://YOUR_SERVER_IP:9200
+curl -u elastic:your_password http://your_server_ip_here:9200
 
 # 检查防火墙是否开放 9200 端口
 # 确认 ES_HOST、ES_USERNAME、ES_PASSWORD 配置正确
@@ -440,7 +440,7 @@ curl -u elastic:your_password http://YOUR_SERVER_IP:9200
 
 ```bash
 # 测试 MinIO 连接
-curl http://YOUR_SERVER_IP:9000/minio/health/live
+curl http://your_server_ip_here:9000/minio/health/live
 
 # 检查 MINIO_ENDPOINT、MINIO_ACCESS_KEY、MINIO_SECRET_KEY
 # 确保 bucket 已创建
@@ -966,7 +966,7 @@ bash deploy-auto.sh
 # minio 对象存储配置
 MINIO_ENDPOINT=10.206.0.15:9000
 MINIO_ACCESS_KEY=its_appkey
-MINIO_SECRET_KEY=REDACTED_SECRET
+MINIO_SECRET_KEY=your_minio_secret_key_here
 MINIO_BUCKET=knowledge-base
 MINIO_SECURE=false
 ```
