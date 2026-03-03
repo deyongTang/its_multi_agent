@@ -13,20 +13,14 @@ from infrastructure.tools.local.service_station import (
     resolve_user_location_from_text_raw,
     query_nearest_repair_shops_by_coords_raw,
 )
-from infrastructure.utils.resilience import safe_parse_json, async_retry_with_timeout
+from infrastructure.utils.resilience import async_retry_with_timeout
 from infrastructure.utils.observability import node_timer
 from multi_agent.workflow.state import RetrievalSubState
+from multi_agent.workflow.nodes.evaluation_strategies import get_strategy
 
 
 @async_retry_with_timeout(timeout_s=20, max_retries=2)
-async def _llm_evaluate(prompt: str) -> str:
-    """LLM 评估调用（带超时重试）"""
-    resp = await sub_model.ainvoke([{"role": "user", "content": prompt}])
-    return resp.content if isinstance(resp.content, str) else str(resp.content)
-
-
-@async_retry_with_timeout(timeout_s=20, max_retries=2)
-async def _llm_rewrite(prompt: str) -> str:
+async def _llm_rewrite(prompt: str) -> str:  # noqa: keep for rewrite node
     """LLM 改写调用（带超时重试）"""
     resp = await sub_model.ainvoke([{"role": "user", "content": prompt}])
     return resp.content.strip()
@@ -88,57 +82,31 @@ async def node_retrieval_search(state: RetrievalSubState) -> dict:
 @node_timer("retrieval.evaluate")
 async def node_retrieval_evaluate(state: RetrievalSubState) -> dict:
     """
-    LLM 评估检索结果质量，决定是否需要重试
+    评估检索结果质量，根据数据源选择对应的评估策略。
+
+    策略路由:
+      kb          → KBEvaluationStrategy       (规则判断，KB 内部已 Rerank 保障质量)
+      web         → WebEvaluationStrategy       (LLM 语义评估)
+      local_tools → LocalToolsEvaluationStrategy(结构字段校验)
+
+    新增数据源时只需在 evaluation_strategies.STRATEGY_REGISTRY 注册，此节点无需修改。
     """
+    source = state.get("source", "")
     docs = state.get("documents", [])
     original_query = state.get("original_query", "")
     loop_count = state.get("loop_count", 0)
-    source = state.get("source", "")
 
-    # 无结果直接判定不足
-    if not docs:
-        suggestion = "switch_source" if source == "kb" else "pass"
-        logger.info(f"[Evaluate] 无结果, suggestion={suggestion}")
-        return {
-            "is_sufficient": False,
-            "suggestion": suggestion,
-            "loop_count": loop_count + 1,
-        }
+    strategy = get_strategy(source)
+    result = await strategy.evaluate(docs=docs, original_query=original_query)
 
-    # 拼接检索结果摘要给 LLM 判断
-    doc_summary = "\n".join(
-        f"[{d.get('source','')}] {d.get('content','')[:200]}" for d in docs[:5]
+    logger.info(
+        f"[Evaluate] source={source} | sufficient={result.is_sufficient} "
+        f"| suggestion={result.suggestion} | reason={result.reason}"
     )
 
-    prompt = f"""你是检索质量评估专家。请判断以下检索结果是否足够回答用户问题。
-
-用户问题: {original_query}
-
-检索结果:
-{doc_summary}
-
-评估标准：
-- 只要检索结果与用户问题相关且包含有用信息，就判定为 sufficient=true
-- 不要因为信息"不够完整"或"不够精确"就判 false，网络搜索结果本身就有局限性
-- 只有检索结果完全无关或为空时才判 false
-
-请用 JSON 格式回答（不要输出其他内容）:
-{{"sufficient": true/false, "reason": "简短理由", "suggestion": "pass"或"retry_same"或"switch_source"}}"""
-
-    try:
-        text = await _llm_evaluate(prompt)
-        result = safe_parse_json(text, {"sufficient": True, "suggestion": "pass"})
-        is_sufficient = result.get("sufficient", True)
-        suggestion = result.get("suggestion", "pass")
-        logger.info(f"[Evaluate] sufficient={is_sufficient}, suggestion={suggestion}, reason={result.get('reason','')}")
-    except Exception as e:
-        logger.warning(f"[Evaluate] LLM 判断失败，默认通过: {e}")
-        is_sufficient = True
-        suggestion = "pass"
-
     return {
-        "is_sufficient": is_sufficient,
-        "suggestion": suggestion,
+        "is_sufficient": result.is_sufficient,
+        "suggestion": result.suggestion,
         "loop_count": loop_count + 1,
     }
 
