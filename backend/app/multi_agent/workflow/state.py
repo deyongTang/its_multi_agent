@@ -47,6 +47,9 @@ class AgentState(TypedDict):
     # --- 检索结果 ---
     retrieved_documents: Annotated[List[Any], operator.add]
 
+    # --- 意图自纠错 ---
+    intent_retry_count: int       # 意图纠错已触发次数，防止死循环（最多 1 次）
+
     # --- 结果控制 ---
     need_human_help: bool
     final_report: Optional[Dict[str, Any]]

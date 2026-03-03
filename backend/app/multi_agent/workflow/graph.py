@@ -1,8 +1,9 @@
 """
-LangGraph Workflow Graph Definition (v2.0 - Hybrid Architecture)
+LangGraph Workflow Graph Definition (v2.1 - Self-Correction)
 
-外层显式管道 + 内层自主循环检索子图
-  intent → slot_filling → [检索子图: 自主循环] → verify → generate_report → END
+外层显式管道 + 内层自主循环检索子图 + 意图自纠错
+  意图正确时：intent → slot_filling → [检索子图] → verify → generate_report → END
+  意图错误时：intent → slot_filling → [检索子图] → verify → intent_reflect → slot_filling → ...
 """
 
 from langgraph.graph import StateGraph, END
@@ -15,13 +16,14 @@ from multi_agent.workflow.nodes.ask_user_node import node_ask_user
 from multi_agent.workflow.nodes.general_chat_node import node_general_chat
 from multi_agent.workflow.nodes.merge_verify_nodes import node_verify
 from multi_agent.workflow.nodes.action_nodes import node_escalate, node_generate_report
+from multi_agent.workflow.nodes.intent_reflect_node import node_intent_reflect
 
 # Retrieval SubGraph
 from multi_agent.workflow.retrieval_subgraph import build_retrieval_subgraph
 
 # Edges
 from multi_agent.workflow.edges import route_intent, route_slot_check, route_ask_user_result
-from multi_agent.workflow.edges.routers_phase2 import route_verify_result
+from multi_agent.workflow.edges.routers_phase2 import route_verify_result, route_after_reflect
 
 from infrastructure.logging.logger import logger
 
@@ -92,6 +94,7 @@ def create_workflow_graph():
     workflow.add_node("verify", node_verify)
     workflow.add_node("escalate", node_escalate)
     workflow.add_node("generate_report", node_generate_report)
+    workflow.add_node("intent_reflect", node_intent_reflect)
 
     # --- Entry ---
     workflow.set_entry_point("intent")
@@ -111,7 +114,13 @@ def create_workflow_graph():
 
     workflow.add_conditional_edges("verify", route_verify_result, {
         "generate_report": "generate_report",
-        "escalate": "escalate",
+        "intent_reflect":  "intent_reflect",
+        "escalate":        "escalate",
+    })
+
+    workflow.add_conditional_edges("intent_reflect", route_after_reflect, {
+        "slot_filling": "slot_filling",
+        "escalate":     "escalate",
     })
 
     # End Nodes

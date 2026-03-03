@@ -44,15 +44,39 @@ def route_kb_check(state: AgentState) -> Literal["merge_results", "search_web"]:
         logger.warning("KB 检索无结果 (Miss)，显式触发网络搜索兜底 (Fallback -> Web)")
         return "search_web"
 
-def route_verify_result(state: AgentState) -> Literal["generate_report", "escalate"]:
+def route_verify_result(state: AgentState) -> Literal["generate_report", "intent_reflect", "escalate"]:
     """
-    最终结果校验
+    最终结果校验路由
+
+    - 有文档          → generate_report
+    - 无文档且首次失败 → intent_reflect（触发意图自纠错，最多 1 次）
+    - 无文档且已纠错过 → escalate（兜底转人工）
     """
     docs = state.get("retrieved_documents", [])
-    
+
     if docs:
         return "generate_report"
-    
-    # 如果 Web 搜完还是空的，或者 KB->Web 还是空的，直接转人工
-    # 不再进行循环重试
+
+    # 首次检索失败：尝试意图反思
+    if state.get("intent_retry_count", 0) < 1:
+        logger.info("[RouteVerify] 检索结果为空，触发意图反思节点")
+        return "intent_reflect"
+
+    # 意图已纠错仍失败，或超过重试上限：转人工
+    logger.warning("[RouteVerify] 意图纠错后仍无结果，升级人工处理")
+    return "escalate"
+
+
+def route_after_reflect(state: AgentState) -> Literal["slot_filling", "escalate"]:
+    """
+    意图反思后路由
+
+    - 意图已修正 → slot_filling（用新意图重新提取槽位，走完整流程）
+    - 意图未变   → escalate（反思确认意图本身没问题，只是确实找不到）
+    """
+    if state.get("intent_corrected", False):
+        logger.info(f"[RouteReflect] 意图已纠正为 [{state.get('current_intent')}]，重新走 slot_filling")
+        return "slot_filling"
+
+    logger.info("[RouteReflect] 意图无需纠正，升级人工处理")
     return "escalate"

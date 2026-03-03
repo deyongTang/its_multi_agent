@@ -56,6 +56,7 @@ class WorkflowRunner:
             "missing_slots": [],
             "ask_user_count": 0,
             "retrieved_documents": [],
+            "intent_retry_count": 0,
             "need_human_help": False,
             "final_report": None,
         }
@@ -134,6 +135,7 @@ class WorkflowRunner:
             "missing_slots": [],
             "ask_user_count": inferred_ask_count,
             "retrieved_documents": [],
+            "intent_retry_count": 0,
             "need_human_help": False,
             "final_report": None,
         }
