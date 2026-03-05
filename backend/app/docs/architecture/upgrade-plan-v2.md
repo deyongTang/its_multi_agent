@@ -1,6 +1,6 @@
 # ITS 多智能体系统架构升级计划 v2.0
 
-> 日期: 2026-02-25 | 状态: Phase 3 ✅ 已完成，Phase 4 进行中
+> 日期: 2026-03-05 | 状态: Phase 4 ✅ 已完成，Phase 5 ✅ 已完成
 
 ---
 
@@ -13,7 +13,9 @@
 ```
 外层管道（确定性）
   intent → slot_filling → [检索子图: 自主循环] → verify → generate_report → END
-                                                    ↓ (验证失败)
+                ↑                                   ↓ (验证失败 & 首次)
+                └────── intent_reflect（意图反思）──┘
+                                                    ↓ (验证失败 & 已纠错)
                                                  escalate → END
 
 内层子图（智能性）
@@ -66,7 +68,8 @@ intent → route_intent ──┤
 |------|------|------|
 | `route_intent` | `edges/route_intent.py` | chitchat → general_chat，其余 → slot_filling |
 | `route_slot_check` | `edges/route_slot_check.py` | 有缺失槽位 → ask_user，槽位齐全 → retrieval |
-| `route_verify_result` | `edges/routers_phase2.py` | 有文档 → generate_report，无文档 → escalate |
+| `route_verify_result` | `edges/routers_phase2.py` | 有文档 → generate_report，无文档&首次 → intent_reflect，无文档&已纠错 → escalate |
+| `route_after_reflect` | `edges/routers_phase2.py` | 意图已纠正 → slot_filling，意图未变 → escalate |
 
 ### 3.2 检索子图（已实现）
 
@@ -159,7 +162,7 @@ class RetrievalSubState(TypedDict):
 3. `escalate` 对接工单系统（待处理）
 4. ~~会话存储从 JSON 文件升级到 Redis/MySQL~~（已完成，见 4.5）
 
-### Phase 4：工业级加固 🔧 进行中
+### Phase 4：工业级加固 ✅ 已完成
 
 目标：将 Demo 级实现升级为生产可用，重点解决**可靠性、可观测性、健壮性**三大短板。
 
@@ -254,11 +257,58 @@ UNIQUE KEY uniq_session_seq (user_id, session_id, seq_id)
 
 ---
 
+### Phase 5：意图自纠错 ✅ 已完成
+
+目标：verify 失败时不直接转人工，先反思意图是否识别错误，纠正后重走完整流程。
+
+#### 5.1 新增节点：intent_reflect
+
+**问题**：verify 判定结果为空时直接 escalate，但有可能是意图识别错误导致检索方向偏了。
+
+**方案**：
+- 新增 `node_intent_reflect` 节点，触发时机：verify 失败 且 `intent_retry_count == 0`
+- LLM 对比原始问题与当前意图，判断是否存在误分类
+- 意图纠正 → 清空旧槽位，回到 `slot_filling` 重走完整流程
+- 意图正确 → 确认检索失败非意图问题，走 escalate
+- `intent_retry_count` 计数器确保最多触发 1 次，防止死循环
+
+**图拓扑变化（v2.0 → v2.1）**：
+```
+verify (失败) → intent_reflect → slot_filling（意图已纠正）
+                              └→ escalate    （意图正确，确实找不到）
+```
+
+**涉及文件**：
+- `nodes/intent_reflect_node.py` — 新节点实现
+- `edges/routers_phase2.py` — `route_verify_result` 新增 intent_reflect 分支，新增 `route_after_reflect`
+- `graph.py` — 注册新节点，接入条件边
+- `state.py` — `AgentState` 新增 `intent_retry_count` 和 `intent_corrected` 字段
+- `runner.py` — `initial_state` 初始化 `intent_retry_count=0`
+
+#### 5.2 评估节点策略模式重构
+
+**问题**：`node_retrieval_evaluate` 对所有数据源用同一套 LLM 评估逻辑，KB 场景不必要地调用 LLM（KB 内部已 Rerank 保障质量）。
+
+**方案**：
+- 新增 `evaluation_strategies.py`，定义三种评估策略：
+  - `KBEvaluationStrategy`：规则判断（文档数 > 0 即通过）
+  - `WebEvaluationStrategy`：LLM 语义评估（Web 结果质量不稳定）
+  - `LocalToolsEvaluationStrategy`：结构字段校验（按 schema 判断）
+- `node_retrieval_evaluate` 节点只负责选策略 + 调用，不含判断逻辑
+- 新增数据源时只需在 `STRATEGY_REGISTRY` 注册
+
+**涉及文件**：
+- `nodes/evaluation_strategies.py` — 三种策略实现
+- `nodes/retrieval_subgraph_nodes.py` — 节点改为调用策略，移除冗余 LLM 调用
+
+---
+
 ## 6. 技术亮点总结
 
 1. **确定性与智能性兼得** — 外层管道保证流程可控、可观测；检索子图让模型在受控范围内自主决策（改写 query、切换数据源）
-2. **自我纠错能力** — 检索子图 evaluate→rewrite 循环，最多 3 次自动重试，不再依赖硬编码兜底
-3. **质量把关闭环** — verify 节点让 LLM 做最终质量判断，不合格直接走 escalate 转人工
-4. **状态隔离** — 主图 `AgentState` 与子图 `RetrievalSubState` 分离，通过桥接节点映射，互不污染
-5. **渐进式升级** — Phase 1/2 已完成，Phase 3 进行中，每阶段独立可交付
-6. **会话存储工业化** — MySQL 增量写入（INSERT IGNORE）+ Redis 缓存双层架构，写入代价从 O(n) 降为 O(1)，读取命中率接近 100%
+2. **检索自纠错** — 检索子图 evaluate→rewrite 循环，最多 3 次自动重试，不再依赖硬编码兜底
+3. **意图自纠错**（v2.1）— verify 失败时先反思意图是否识别错误，纠正后回 slot_filling 重走完整流程，最多触发 1 次防死循环
+4. **质量把关闭环** — verify 节点让 LLM 做最终质量判断，不合格先纠错，纠错无效再转人工
+5. **评估策略模式** — 不同数据源用不同评估策略（KB 规则/Web LLM/LocalTools 字段校验），新增数据源只需注册
+6. **状态隔离** — 主图 `AgentState` 与子图 `RetrievalSubState` 分离，通过桥接节点映射，互不污染
+7. **会话存储工业化** — MySQL 增量写入（INSERT IGNORE）+ Redis 缓存双层架构，写入代价从 O(n) 降为 O(1)，读取命中率接近 100%

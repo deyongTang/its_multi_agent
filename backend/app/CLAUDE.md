@@ -28,17 +28,17 @@ cd ../../front/agent_web_ui && npm run dev
 
 ## Architecture
 
-### 请求处理流程（V2 - LangGraph）
+### 请求处理流程（V2.1 - LangGraph + 意图自纠错）
 
 ```
 POST /api/query → routers.py → MultiAgentServiceV2.process_task()
   → LangGraph Workflow (graph.py):
     intent → slot_filling ↔ ask_user (循环追问)
-           → strategy_gen → dispatch:
-               ├─ query_knowledge → kb_check → (miss) → search_web
-               ├─ search_web
-               └─ query_local_tools
-           → merge_results → verify → generate_report / escalate
+           → retrieval [检索子图: dispatch → search → evaluate → rewrite(max 3次)]
+           → verify
+               ├─ 通过              → generate_report
+               ├─ 失败 & 首次       → intent_reflect → slot_filling (重走流程)
+               └─ 失败 & 已纠错过   → escalate
            → general_chat (闲聊直接结束)
   → SSE StreamingResponse
 ```
@@ -49,8 +49,8 @@ POST /api/query → routers.py → MultiAgentServiceV2.process_task()
 - `multi_agent/` — 核心智能体层
   - `workflow/graph.py` — LangGraph 状态机定义，所有节点和边的编排
   - `workflow/state.py` — `AgentState` 黑板模式状态定义（意图、槽位、检索策略、文档、诊断步骤）
-  - `workflow/nodes/` — 各处理节点（intent、slot_filling、strategy_gen、search、merge_verify、action）
-  - `workflow/edges/` — 条件路由逻辑（route_intent、route_slot_check、route_dispatch、route_kb_check、route_verify_result）
+  - `workflow/nodes/` — 各处理节点（intent、slot_filling、ask_user、general_chat、retrieval_subgraph、merge_verify、intent_reflect、action）
+  - `workflow/edges/` — 条件路由逻辑（route_intent、route_slot_check、route_verify_result、route_after_reflect）
   - `orchestrator_agent.py` / `technical_agent.py` / `service_agent.py` — 三大智能体定义
 - `services/` — 业务逻辑层。`agent_service_v2.py` 是当前主入口（V1 已废弃），`session_service.py` 管理会话
 - `infrastructure/` — 基础设施
@@ -69,7 +69,8 @@ POST /api/query → routers.py → MultiAgentServiceV2.process_task()
 
 - **状态机模式**：`AgentState`（TypedDict）作为共享黑板，节点通过更新状态字段传递信息
 - **消息追加**：`messages` 字段使用 `Annotated[List, operator.add]` 确保多轮对话消息追加而非覆盖
-- **显式顺序管线**：v1.4 移除了并行 fan-out，改为显式顺序 dispatch → 知识库优先 → Web 兜底
+- **显式顺序管线**：外层管道确定性，检索子图内部智能自主循环（evaluate→rewrite，最多 3 次）
+- **意图自纠错**（v2.1）：verify 失败时先反思意图是否识别正确，纠正后回到 slot_filling 重走流程，最多触发 1 次（`intent_retry_count` 防死循环）
 - **检查点持久化**：优先使用 `RedisSaver`，Redis 不可用时降级为 `MemorySaver`
 - **槽位追问防死循环**：`ask_user_count` 字段限制追问次数
 

@@ -8,7 +8,8 @@
 | v1.3 | 2026-01-28 | 已归档 | 架构师 | 补充 LangGraph 节点与边的详细定义及流程图 |
 | v1.4 | 2026-01-28 | 已归档 | 架构师 | 新增会话与记忆管理设计 (State-First 理念) |
 | v1.5 | 2026-01-29 | 已归档 | 架构师 | 架构解耦优化：严格界定智能助手与知识库微服务边界 |
-| v2.0 | 2026-02-23 | **现行有效** | 架构师 | **升级为混合架构：外层显式管道 + 内层检索子图自主循环** |
+| v2.0 | 2026-02-23 | 已归档 | 架构师 | 升级为混合架构：外层显式管道 + 内层检索子图自主循环 |
+| v2.1 | 2026-03-05 | **现行有效** | 架构师 | **新增意图自纠错机制：verify 失败 → intent_reflect → slot_filling 重走流程** |
 
 ---
 
@@ -17,7 +18,7 @@
 经过架构评审，系统采用 **LangGraph** 作为底层的编排框架，严格遵循 **“Agent 做编排，微服务做业务”** 的解耦原则。
 
 ### 1.1 架构原则：Hybrid Pipeline + Autonomous SubGraph
-*   **外层确定性**: 主图采用显式管道编排（intent → slot → retrieval → verify → report），流程可控、可观测。
+*   **外层确定性**: 主图采用显式管道编排（intent → slot → retrieval → verify → report/intent_reflect），流程可控、可观测。
 *   **内层智能性**: 检索环节嵌入带循环的子图，模型在受控范围内自主决策（改写 query、切换数据源，最多 3 次）。
 *   **状态隔离**: 主图 `AgentState` 与子图 `RetrievalSubState` 分离，通过桥接节点映射，互不污染。
 *   **状态强一致性**: 采用强类型 State Schema + `operator.add` 追加语义，确保多轮对话上下文不丢失。
@@ -37,7 +38,7 @@
 
 ### 3.1 主图节点定义 (Main Graph Nodes)
 
-主图包含 **8 个节点**，检索环节由子图封装：
+主图包含 **9 个节点**，检索环节由子图封装：
 
 | 节点名称 | 文件 | 职责 (Responsibility) | 输入 (Input) | 输出 (Update) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -47,6 +48,7 @@
 | **node_general_chat** | `nodes/general_chat_node.py` | 闲聊回复，引导回业务 | `messages` | `messages` |
 | **node_retrieval** | `graph.py` (桥接节点) | 运行检索子图，映射状态 | `current_intent`, `slots`, `messages` | `retrieved_documents` |
 | **node_verify** | `nodes/merge_verify_nodes.py` | LLM 质量判断 | `retrieved_documents`, `messages` | `retrieved_documents` (不合格时清空) |
+| **node_intent_reflect** | `nodes/intent_reflect_node.py` | 反思意图是否识别错误，纠正后回头重走流程 | `messages`, `current_intent`, `slots` | `current_intent`, `slots`, `intent_retry_count`, `intent_corrected` |
 | **node_generate_report** | `nodes/action_nodes.py` | 综合检索结果生成答案 | `retrieved_documents`, `current_intent`, `messages` | `final_report`, `messages` |
 | **node_escalate** | `nodes/action_nodes.py` | 转人工客服 | — | `need_human_help`, `messages` |
 
@@ -71,7 +73,8 @@
 | **intent** | `route_intent` | chitchat -> `general_chat`<br>tech_issue/service_station/poi_navigation/search_info -> `slot_filling` |
 | **slot_filling** | `route_slot_check` | 有缺失槽位 -> `ask_user`<br>槽位齐全 -> `retrieval` |
 | **retrieval** | - (固定边) | -> `verify` |
-| **verify** | `route_verify_result` | 有文档 -> `generate_report`<br>无文档 -> `escalate` |
+| **verify** | `route_verify_result` | 有文档 -> `generate_report`<br>无文档 & 首次 -> `intent_reflect`<br>无文档 & 已纠错 -> `escalate` |
+| **intent_reflect** | `route_after_reflect` | 意图已纠正 -> `slot_filling`<br>意图未变 -> `escalate` |
 | **general_chat / ask_user / generate_report / escalate** | - | -> `END` |
 
 **检索子图路由：**
@@ -89,6 +92,7 @@
 graph TD
     classDef action fill:#f9f,stroke:#333,stroke-width:2px;
     classDef check fill:#ffd,stroke:#333,stroke-width:2px;
+    classDef reflect fill:#dff,stroke:#333,stroke-width:2px;
     classDef endNode fill:#eee,stroke:#333,stroke-width:1px;
 
     __start__((Start)) --> node_intent[Intent 意图识别]:::check
@@ -114,8 +118,12 @@ graph TD
     node_retrieval --> RetrievalSubGraph
     RetrievalSubGraph --> node_verify{Verify 质量校验}:::check
 
-    node_verify -- "retrieved_documents ≠ []" --> node_generate_report[Generate Report 生成答案]:::action
-    node_verify -- "retrieved_documents = []" --> node_escalate[Escalate 转人工]:::action
+    node_verify -- "有文档" --> node_generate_report[Generate Report 生成答案]:::action
+    node_verify -- "无文档 & 首次失败" --> node_intent_reflect[Intent Reflect\n意图自纠错]:::reflect
+    node_verify -- "无文档 & 已纠错过" --> node_escalate[Escalate 转人工]:::action
+
+    node_intent_reflect -- "意图已纠正\n清空槽位重走" --> node_slot_filling
+    node_intent_reflect -- "意图无误\n确认找不到" --> node_escalate
 
     node_general_chat --> __end__
     node_generate_report --> __end__
@@ -149,6 +157,9 @@ class AgentState(TypedDict):
     # 结果控制
     need_human_help: bool
     final_report: Optional[Dict[str, Any]]
+    # 意图自纠错（v2.1）
+    intent_retry_count: int          # 已触发纠错次数（max 1，防死循环）
+    intent_corrected: bool           # 本轮意图是否被纠正
 ```
 
 ### 4.2 检索子图状态 (RetrievalSubState)
