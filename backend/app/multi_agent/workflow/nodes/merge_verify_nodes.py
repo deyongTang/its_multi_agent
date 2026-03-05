@@ -1,10 +1,13 @@
 """
 结果校验节点 (Verify Node)
 
-使用 LLM 做最终质量把关：
-- 检索结果和用户问题是否匹配
-- 是否存在矛盾信息
-- 是否需要人工介入
+使用 LLM 对检索结果做质量判断（日志记录用），供 generate_report 参考。
+
+设计原则：
+  verify 节点只做"告知"，不做"拦截"。
+  即使质量不佳，也不清空 retrieved_documents —— 意图纠错是最后手段，
+  只应在检索本身真的一无所获时触发，而不应因"文档有但质量低"而提前触发。
+  有文档就交给 report 节点尽力作答；真正没文档才由路由决定纠错或转人工。
 """
 
 from multi_agent.workflow.state import AgentState
@@ -62,10 +65,13 @@ async def node_verify(state: AgentState) -> dict:
         result = safe_parse_json(text, {"pass": True})
 
         if not result.get("pass", True):
-            logger.warning(f"[Verify] 质量校验未通过: {result.get('reason', '')}")
-            return {"retrieved_documents": []}
-
-        logger.info(f"[Verify] 质量校验通过: {result.get('reason', '')}")
+            # 质量不佳时仅记录告警，不清空文档。
+            # 意图纠错是最后手段，只在检索本身返回空时触发；
+            # 若检索已找到内容（哪怕相关性低），应让 report 节点尽力作答，
+            # 而不是把"低质量"误判为"意图识别错误"。
+            logger.warning(f"[Verify] 质量校验未通过（仍保留文档，交由 report 尽力作答）: {result.get('reason', '')}")
+        else:
+            logger.info(f"[Verify] 质量校验通过: {result.get('reason', '')}")
     except Exception as e:
         logger.warning(f"[Verify] LLM 校验异常，默认通过: {e}")
 

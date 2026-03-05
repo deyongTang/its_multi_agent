@@ -48,22 +48,31 @@ def route_verify_result(state: AgentState) -> Literal["generate_report", "intent
     """
     最终结果校验路由
 
-    - 有文档          → generate_report
-    - 无文档且首次失败 → intent_reflect（触发意图自纠错，最多 1 次）
-    - 无文档且已纠错过 → escalate（兜底转人工）
+    - 有文档                                       → generate_report
+    - 无文档 & 本地工具意图 & 首次失败              → intent_reflect
+    - 无文档 & 其他意图（tech/search）              → escalate
+    - 无文档 & 已纠错过                            → escalate
+
+    意图纠错是最后手段，仅在"走本地工具路径（service_station/poi_navigation）
+    且确实找不到数据"时触发。tech_issue 和 search_info 的检索子图内部
+    已通过 rewrite 换源到网络搜索兜底，无需再纠错意图。
     """
     docs = state.get("retrieved_documents", [])
 
     if docs:
         return "generate_report"
 
-    # 首次检索失败：尝试意图反思
-    if state.get("intent_retry_count", 0) < 1:
-        logger.info("[RouteVerify] 检索结果为空，触发意图反思节点")
+    intent = state.get("current_intent", "")
+    LOCAL_TOOLS_INTENTS = {"service_station", "poi_navigation"}
+
+    # 只有本地工具意图（无网络兜底）且首次失败，才值得反思意图
+    if intent in LOCAL_TOOLS_INTENTS and state.get("intent_retry_count", 0) < 1:
+        logger.info(f"[RouteVerify] 检索为空 | 意图={intent}（本地工具路径，无网络兜底），触发意图反思")
         return "intent_reflect"
 
-    # 意图已纠错仍失败，或超过重试上限：转人工
-    logger.warning("[RouteVerify] 意图纠错后仍无结果，升级人工处理")
+    # tech_issue / search_info：子图内部已有 KB→Web 换源兜底，无需纠错意图
+    # 或已纠错过一次仍无结果：直接转人工
+    logger.warning(f"[RouteVerify] 检索为空 | 意图={intent}，升级人工处理")
     return "escalate"
 
 

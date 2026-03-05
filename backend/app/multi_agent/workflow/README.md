@@ -1,13 +1,17 @@
-# LangGraph 工作流引擎 - v2.1 (意图自纠错)
+# LangGraph 工作流引擎 - v2.2 (意图纠错精准化)
 
 ## 概述
 
 基于 LangGraph 的状态机编排引擎，实现意图识别、槽位填充、检索子图自主循环、意图自纠错等功能。
 
-**当前版本：v2.1**
+**当前版本：v2.2**
 - v1.x：Phase 1，基础意图 + 槽位填充
 - v2.0：混合架构，外层显式管道 + 内层检索子图自主循环
 - v2.1：意图自纠错（verify 失败 → 反思意图 → 重走流程）
+- v2.2：意图纠错精准化
+  - verify 节点不再因质量问题清空文档，改为"只告知，不拦截"
+  - 意图纠错仅对本地工具路径（service_station / poi_navigation）生效
+  - tech_issue / search_info 的检索子图内部已有网络搜索兜底，无需纠错意图
 
 ## 目录结构
 
@@ -57,16 +61,19 @@ route_intent
                           │    └── rewrite（改写/换源）       │
                           └──────────────────────────────────┘
                                   ↓
-                          node_verify（LLM 质量校验）
+                          node_verify（LLM 质量校验，只告知不拦截）
                                   ↓
                           route_verify_result
-                            ├─→ 有文档               → node_generate_report → END
-                            ├─→ 无文档 & 首次失败    → node_intent_reflect（意图反思）
+                            ├─→ 有文档                                  → node_generate_report → END
+                            ├─→ 无文档 & service_station/poi & 首次失败  → node_intent_reflect（意图反思）
                             │                              ↓
                             │                        route_after_reflect
                             │                          ├─→ 意图已纠正 → node_slot_filling（重走流程）
                             │                          └─→ 意图正确   → node_escalate → END
-                            └─→ 无文档 & 已纠错过    → node_escalate → END
+                            └─→ 无文档 & 其他意图 / 已纠错过             → node_escalate → END
+
+  注：tech_issue 和 search_info 检索子图内部已有 KB→Web 换源兜底，
+      若仍无结果说明系统里确实没有答案，直接转人工，无需纠错意图。
 ```
 
 ## 节点说明
@@ -80,8 +87,8 @@ route_intent
 | `ask_user` | `nodes/ask_user_node.py` | 生成追问，最多 3 轮后升级人工 |
 | `general_chat` | `nodes/general_chat_node.py` | 闲聊回复 |
 | `retrieval` | `graph.py::node_retrieval` | 桥接主图 ↔ 检索子图 |
-| `verify` | `nodes/merge_verify_nodes.py` | LLM 判断检索结果是否匹配问题 |
-| `intent_reflect` | `nodes/intent_reflect_node.py` | 反思意图是否识别错误，纠正后回头重走 |
+| `verify` | `nodes/merge_verify_nodes.py` | LLM 判断检索结果质量（只告知，不清空文档、不拦截流程） |
+| `intent_reflect` | `nodes/intent_reflect_node.py` | 反思意图是否识别错误（仅对本地工具意图触发，最多 1 次） |
 | `generate_report` | `nodes/action_nodes.py` | 综合检索结果生成最终答案（流式） |
 | `escalate` | `nodes/action_nodes.py` | 标记 `need_human_help=True`，转人工 |
 
@@ -101,7 +108,7 @@ route_intent
 | `route_intent` | `edges/route_intent.py` | chitchat→general_chat，其余→slot_filling |
 | `route_slot_check` | `edges/route_slot_check.py` | 有缺失→ask_user，齐全→retrieval；**意图纠错回流时有缺失也直接→retrieval（不再追问）** |
 | `route_evaluate` | `retrieval_subgraph.py` | sufficient 或达上限→exit，否则→rewrite |
-| `route_verify_result` | `edges/routers_phase2.py` | 有文档→report，无文档&首次→intent_reflect，无文档&已纠错→escalate |
+| `route_verify_result` | `edges/routers_phase2.py` | 有文档→report；无文档&本地工具意图&首次→intent_reflect；其余→escalate |
 | `route_after_reflect` | `edges/routers_phase2.py` | 意图已纠正→slot_filling，意图未变→escalate |
 
 ## 状态定义

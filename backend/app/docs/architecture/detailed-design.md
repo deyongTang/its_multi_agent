@@ -5,6 +5,7 @@
 | v1.0 | 2026-01-28 | 架构师 | 初始化状态机与动态检索策略设计 |
 | v2.0 | 2026-01-28 | 架构师 | 升级为工业级架构，增加数据闭环、安全合规、人机协同等模块 |
 | v3.0 | 2026-02-23 | 架构师 | **同步 v2.0 混合架构：检索子图自主循环替代 StrategyGen 硬编码分发** |
+| v3.1 | 2026-03-05 | 架构师 | **意图纠错精准化：verify 改为只告知不拦截；纠错仅对本地工具路径生效** |
 
 ---
 
@@ -52,10 +53,14 @@ graph TD
         end
 
         Retrieval --> SubGraph
-        SubGraph --> Verify[Verify 质量校验]
+        SubGraph --> Verify[Verify 质量校验<br/>只告知不拦截]
 
-        Verify -->|通过| Report[Generate Report]
-        Verify -->|失败| Escalate[Escalate 转人工]
+        Verify --> RouteVerify{route_verify_result}
+        RouteVerify -->|有文档| Report[Generate Report]
+        RouteVerify -->|无文档 & 本地工具意图 & 首次| Reflect[Intent Reflect 意图反思]
+        RouteVerify -->|无文档 & 其他| Escalate[Escalate 转人工]
+        Reflect -->|意图已纠正| SlotFilling
+        Reflect -->|意图正确| Escalate
     end
 
     subgraph Knowledge["Knowledge & Service Layer"]
@@ -88,7 +93,7 @@ graph TD
 *   **SLOT_FILLING**: 强制信息收集。根据意图提取所需槽位（如 `problem_description`, `device_model`）。若缺失，路由到 `ASK_USER`。
 *   **ASK_USER**: 生成追问话术，最多 3 轮后自动升级人工。
 *   **RETRIEVAL**: 桥接节点，运行检索子图（dispatch→search→evaluate→rewrite 循环，max 3 次）。
-*   **VERIFY**: LLM 质量判断，检索结果是否匹配用户问题。不合格时清空文档触发 escalate。
+*   **VERIFY**: LLM 质量判断，检索结果是否匹配用户问题（**只告知，不拦截**）。质量不佳时仅记录告警，不清空文档；有文档则交 `GENERATE_REPORT` 尽力作答，真正无文档才由路由决定纠错或转人工。
 *   **GENERATE_REPORT**: 综合检索结果生成最终答案。
 *   **ESCALATE**: 转人工客服，设置 `need_human_help=True`。
 
@@ -103,6 +108,7 @@ graph TD
 #### 3.1.3 异常熔断机制
 *   **追问上限**: `ask_user_count` 最多 3 次，超限时节点设置 `need_human_help=True`，由 `route_ask_user_result` 条件边路由到 `escalate`。
 *   **检索上限**: 子图 `max_retries=3`，超限强制退出带降级标记。
+*   **意图纠错上限**: `intent_retry_count` 最多 1 次，且仅对本地工具意图（service_station / poi_navigation）生效。意图只有 5 种，一次纠正足以覆盖两两混淆；若纠正后仍无结果，说明是数据缺失而非意图问题，直接转人工。
 *   **会话持久化**: 支持 Redis checkpointer（生产）或 MemorySaver（开发）。
 
 ### 3.2 主动检索协议 (Active Retrieval Protocol)
@@ -113,12 +119,14 @@ graph TD
 
 在子图 `dispatch` 节点中，根据 L2 意图自动选择首选数据源：
 
-| L2 意图 | 首选数据源 | 兜底策略 | 适用案例 |
-| :--- | :--- | :--- | :--- |
-| **tech_issue** | KB (知识库) | evaluate 不通过 → 切换 Web | “电脑蓝屏怎么办” |
-| **search_info** | Web (联网搜索) | — (Web 为最终数据源) | “今天北京天气” |
-| **service_station** | Local Tools (MySQL) | — | “最近的联想售后” |
-| **poi_navigation** | Local Tools (MCP 地图) | — | “导航去天安门” |
+| L2 意图 | 首选数据源 | 子图内兜底 | 意图纠错 | 适用案例 |
+| :--- | :--- | :--- | :--- | :--- |
+| **tech_issue** | KB (知识库) | KB Miss → 自动切换 Web | ❌ 不触发（子图已兜底） | “电脑蓝屏怎么办” |
+| **search_info** | Web (联网搜索) | — (Web 为最终数据源) | ❌ 不触发 | “今天北京天气” |
+| **service_station** | Local Tools (MySQL) | — (**无网络兜底**) | ✅ 触发（最多 1 次） | “最近的联想售后” |
+| **poi_navigation** | Local Tools (MCP 地图) | — (**无网络兜底**) | ✅ 触发（最多 1 次） | “导航去天安门” |
+
+> **意图纠错的触发逻辑**：仅当本地工具路径（service_station / poi_navigation）检索子图穷尽重试仍一无所获时，才启动意图反思。tech_issue / search_info 已有网络搜索兜底，若仍无结果说明系统里确实没有答案，直接转人工，无需纠错意图。
 
 #### 3.2.2 自主循环机制
 ```

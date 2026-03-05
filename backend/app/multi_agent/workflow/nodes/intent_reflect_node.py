@@ -1,13 +1,20 @@
 """
 意图反思节点 (node_intent_reflect)
 
-触发时机：检索子图执行完毕，verify 判定结果为空（无法生成报告），
-          且本轮还未发生过意图纠错（intent_retry_count == 0）。
+触发时机：
+  仅当意图为 service_station / poi_navigation（本地工具路径，无网络搜索兜底）
+  且检索子图穷尽所有重试后仍一无所获，且本轮尚未纠错过（intent_retry_count == 0）。
+
+  tech_issue 和 search_info 的检索子图内部已有 KB→Web 换源兜底，
+  若真找不到则属于"系统里没有答案"，直接转人工，无需纠错意图。
 
 职责：
   分析"用这个意图检索为什么会失败"，判断意图识别是否出错。
   - 意图确实错了 → 修正 current_intent，清空槽位，让 slot_filling 重新来过
   - 意图没错（只是没检索到）→ 不改，走 escalate
+
+纠错次数上限：1 次（意图只有 5 种，一次纠正足以覆盖两两混淆的情况；
+  若纠正后仍无结果，说明是数据缺失问题而非意图问题，再纠多少次也无济于事）。
 """
 
 from multi_agent.workflow.state import AgentState
