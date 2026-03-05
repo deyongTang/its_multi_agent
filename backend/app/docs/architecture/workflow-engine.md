@@ -71,7 +71,7 @@
 | :--- | :--- | :--- |
 | **START** | - | -> `intent` |
 | **intent** | `route_intent` | chitchat -> `general_chat`<br>tech_issue/service_station/poi_navigation/search_info -> `slot_filling` |
-| **slot_filling** | `route_slot_check` | 有缺失槽位 -> `ask_user`<br>槽位齐全 -> `retrieval` |
+| **slot_filling** | `route_slot_check` | 有缺失槽位 -> `ask_user`<br>槽位齐全 -> `retrieval`<br>有缺失但 `intent_corrected=True` -> `retrieval`（意图纠错回流，跳过追问） |
 | **retrieval** | - (固定边) | -> `verify` |
 | **verify** | `route_verify_result` | 有文档 -> `generate_report`<br>无文档 & 首次 -> `intent_reflect`<br>无文档 & 已纠错 -> `escalate` |
 | **intent_reflect** | `route_after_reflect` | 意图已纠正 -> `slot_filling`<br>意图未变 -> `escalate` |

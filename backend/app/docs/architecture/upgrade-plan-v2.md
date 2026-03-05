@@ -281,9 +281,12 @@ verify (失败) → intent_reflect → slot_filling（意图已纠正）
 **涉及文件**：
 - `nodes/intent_reflect_node.py` — 新节点实现
 - `edges/routers_phase2.py` — `route_verify_result` 新增 intent_reflect 分支，新增 `route_after_reflect`
+- `edges/route_slot_check.py` — 意图纠错回流时（`intent_corrected=True`）跳过 ask_user，直接走 retrieval
 - `graph.py` — 注册新节点，接入条件边
 - `state.py` — `AgentState` 新增 `intent_retry_count` 和 `intent_corrected` 字段
 - `runner.py` — `initial_state` 初始化 `intent_retry_count=0`
+
+**UX 设计说明**：意图纠错后回到 `slot_filling` 时，若新意图的槽位仍有缺失，不再向用户追问。原因：用户已说明需求，是系统误判了意图，不应让用户重复作答。直接用现有消息中已有信息检索，实在找不到再转人工。
 
 #### 5.2 评估节点策略模式重构
 

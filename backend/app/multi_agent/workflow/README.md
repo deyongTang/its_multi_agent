@@ -99,7 +99,7 @@ route_intent
 | 路由函数 | 位置 | 逻辑 |
 |----------|------|------|
 | `route_intent` | `edges/route_intent.py` | chitchat→general_chat，其余→slot_filling |
-| `route_slot_check` | `edges/route_slot_check.py` | 有缺失→ask_user，齐全→retrieval |
+| `route_slot_check` | `edges/route_slot_check.py` | 有缺失→ask_user，齐全→retrieval；**意图纠错回流时有缺失也直接→retrieval（不再追问）** |
 | `route_evaluate` | `retrieval_subgraph.py` | sufficient 或达上限→exit，否则→rewrite |
 | `route_verify_result` | `edges/routers_phase2.py` | 有文档→report，无文档&首次→intent_reflect，无文档&已纠错→escalate |
 | `route_after_reflect` | `edges/routers_phase2.py` | 意图已纠正→slot_filling，意图未变→escalate |
