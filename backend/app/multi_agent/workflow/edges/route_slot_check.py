@@ -21,10 +21,16 @@ def route_slot_check(state: AgentState) -> str:
         下一个节点名称
     """
     missing_slots = state.get("missing_slots", [])
+    intent_corrected = state.get("intent_corrected", False)
 
     logger.info(f"槽位检查: 缺失 {len(missing_slots)} 个槽位")
 
-    # 有缺失槽位，需要追问
+    # 有缺失槽位，但当前处于意图纠错回流路径——不再追问，直接用现有信息检索
+    if missing_slots and intent_corrected:
+        logger.info(f"意图纠错后回流，跳过追问直接检索（缺失槽位: {missing_slots}）")
+        return "retrieval"
+
+    # 有缺失槽位，正常路径追问
     if missing_slots:
         logger.info(f"槽位不完整，进入追问流程: {missing_slots}")
         return "ask_user"
