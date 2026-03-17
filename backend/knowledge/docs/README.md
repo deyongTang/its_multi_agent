@@ -17,6 +17,14 @@
     > 深度剖析：OSS+ES 存算分离设计、N+1 冗余存储策略、混合检索 (Hybrid Retrieval) 核心逻辑、以及事务级的数据入库流水线。
     > **核心关注：业务数据闭环与流程可控性。**
 
+*   **[RAG_Chunking_Strategy.md](./RAG_Chunking_Strategy.md)**
+    > **RAG 文档切分策略技术文档。**
+    > 系统讲清通用切分方法、优缺点、评估标准，以及为什么 ITS 应该采用 Markdown 结构优先的切分方案。
+
+*   **[Current_ES_Chunking_Flow.md](./Current_ES_Chunking_Flow.md)**
+    > **当前项目 ES 切片流程图。**
+    > 只讲现在这套实现：Markdown 从哪进来、怎么切、怎么向量化、怎么写 ES、检索时怎么回填。
+
 *   **[Roadmap.md](./Roadmap.md)**
     > **系统演进路线图。**
     > 规划了未来的技术方向：包括引入 Cross-Encoder 重排序以提升精度、多模态 RAG (图片理解)、以及基于智能体的相关性筛选机制。
